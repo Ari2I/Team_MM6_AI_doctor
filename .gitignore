@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.idea/
+.vscode/
+# Заявки не должны попадать в репозиторий; tests/data — только вымышленные данные.
+*.xlsx
+*.xls
+!tests/data/*.xlsx
+!tests/data/*.xls
