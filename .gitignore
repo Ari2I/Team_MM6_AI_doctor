@@ -1,0 +1,59 @@
+# Локальные материалы помощника, отчёты, результаты и временные файлы
+/.local/
+/AGENTS.md
+/.superpowers/
+/artifacts/
+/latest_logs/
+*.schema.json
+
+# Секреты и локальная конфигурация окружения
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Python, тесты и анализ кода
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+
+# Сборка и метаданные пакетов
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+
+# Модели, локальные данные и журналы
+/models/
+/data/
+/outputs/
+/results/
+*.log
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.pem
+*.key
+
+# Настройки редакторов и файлы операционной системы
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+~$*
+*.tmp
+*.bak
