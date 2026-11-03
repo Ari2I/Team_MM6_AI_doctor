@@ -35,3 +35,17 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Загрузить и закешировать настройки процесса."""
     return Settings()
+
+
+class ValidationSettings(BaseSettings):
+    """Настройки проверки файлов, не зависящие от подключения к БД."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    max_excel_size_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
+
+
+@lru_cache
+def get_validation_settings() -> ValidationSettings:
+    """Загрузить и закешировать настройки проверки файлов."""
+    return ValidationSettings()

@@ -1,7 +1,7 @@
-"""Общая декларативная база и метаданные для будущих моделей."""
+"""Общая декларативная база и метаданные моделей."""
 
 from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """Пустая база будущих SQLAlchemy-моделей для Alembic."""
+    """База SQLAlchemy-моделей для приложения и Alembic."""
