@@ -14,7 +14,12 @@ class IssueLevel(StrEnum):
 
 
 class IssueCode(StrEnum):
-    """Коды проблем, которые может вернуть проверка файла или заявки."""
+    """Коды проблем файла или заявки.
+
+    Коды проверок дозировки и количества оставлены для совместимости;
+    валидатор их больше не выдаёт. MULTIPLE_DIAGNOSES — информационное
+    предупреждение, не влияющее на is_valid.
+    """
 
     INVALID_EXTENSION = "invalid_extension"
     FILE_TOO_LARGE = "file_too_large"

@@ -1,10 +1,12 @@
 """Проверки валидатора Excel-заявок."""
 
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from openpyxl import load_workbook
 
 from app.schemas.parsing import ParsedItem, ParseIssue, ParseResult
 from app.schemas.validation import IssueCode, IssueLevel, ValidationReport
@@ -87,9 +89,9 @@ def test_file_size_limit_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_missing_column_is_one_critical_issue_per_column() -> None:
     report = validate_parse_result(result(item(), missing_columns=["amount", "diagnosis"]))
 
-    assert codes(report) == [IssueCode.MISSING_COLUMN, IssueCode.MISSING_COLUMN]
-    assert [issue.column for issue in report.issues] == ["amount", "diagnosis"]
-    assert report.critical_count == 2
+    assert codes(report) == [IssueCode.MISSING_COLUMN]
+    assert [issue.column for issue in report.issues] == ["amount"]
+    assert report.critical_count == 1
 
 
 def test_no_data_is_critical() -> None:
@@ -122,12 +124,13 @@ def test_empty_amount_is_warning() -> None:
 
     assert codes(report) == [IssueCode.EMPTY_AMOUNT]
     assert report.is_valid is True
+    assert "не учитывается в долях" in report.issues[0].message
 
 
-def test_empty_quantity_is_warning() -> None:
+def test_missing_quantity_is_ignored() -> None:
     report = validate_parse_result(result(item(quantity=None)))
 
-    assert codes(report) == [IssueCode.EMPTY_QUANTITY]
+    assert codes(report) == []
     assert report.is_valid is True
 
 
@@ -140,29 +143,158 @@ def test_invalid_number_parse_issue_is_warning_without_duplicate_empty_issue() -
     report = validate_parse_result(parsed)
 
     assert codes(report) == [IssueCode.INVALID_NUMBER]
-    assert report.issues[0].message == "Не удалось распознать число в указанном столбце."
+    assert report.issues[0].message == "Не удалось распознать сумму. Строка не учитывается в долях."
     assert "секретные данные" not in report.issues[0].message
 
 
-def test_non_positive_amount_is_warning() -> None:
-    report = validate_parse_result(result(item(amount=Decimal("0"))))
+@pytest.mark.parametrize("amount", [Decimal("0"), Decimal("-1")])
+def test_non_positive_amount_is_warning(amount: Decimal) -> None:
+    report = validate_parse_result(result(item(amount=amount)))
 
     assert codes(report) == [IssueCode.NON_POSITIVE_AMOUNT]
     assert report.is_valid is True
+    assert "не учитывается в долях" in report.issues[0].message
 
 
-def test_non_positive_quantity_is_warning() -> None:
+def test_non_positive_quantity_is_ignored() -> None:
     report = validate_parse_result(result(item(quantity=Decimal("-1"))))
 
-    assert codes(report) == [IssueCode.NON_POSITIVE_QUANTITY]
+    assert codes(report) == []
     assert report.is_valid is True
 
 
-def test_empty_dosage_is_warning() -> None:
+def test_empty_dosage_is_ignored() -> None:
     report = validate_parse_result(result(item(dosage=None)))
 
-    assert codes(report) == [IssueCode.EMPTY_DOSAGE]
+    assert codes(report) == []
     assert report.is_valid is True
+
+
+def test_missing_optional_dosage_and_quantity_columns_are_ignored() -> None:
+    report = validate_parse_result(
+        result(item(dosage=None, quantity=None), missing_columns=["dosage", "quantity"])
+    )
+
+    assert report.issues == []
+
+
+def test_diagnosis_from_request_is_accepted_without_file_diagnosis() -> None:
+    report = validate_parse_result(
+        result(item(diagnosis=None), missing_columns=["diagnosis"]),
+        request_diagnoses=["Диагноз из запроса"],
+    )
+
+    assert report.is_valid is True
+    assert report.issues == []
+
+
+@pytest.mark.parametrize("request_diagnoses", [None, [], ["", "  ", "\n"]])
+def test_blank_request_diagnoses_do_not_replace_missing_diagnosis(
+    request_diagnoses: list[str] | None,
+) -> None:
+    report = validate_parse_result(
+        result(item(diagnosis=None), missing_columns=["diagnosis"]), request_diagnoses
+    )
+
+    assert codes(report) == [IssueCode.NO_DIAGNOSIS]
+    assert report.is_valid is False
+
+
+@pytest.mark.parametrize(
+    ("file_diagnosis", "request_diagnoses", "expected_codes"),
+    [
+        (None, ["Диагноз А", "Диагноз Б"], [IssueCode.MULTIPLE_DIAGNOSES]),
+        ("Диагноз А", ["Диагноз Б", "Диагноз В"], [IssueCode.MULTIPLE_DIAGNOSES]),
+        ("Диагноз А", [" диагноз а ", "ДИАГНОЗ А", ""], []),
+    ],
+)
+def test_distinct_diagnoses_from_both_sources_are_reported_once(
+    file_diagnosis: str | None,
+    request_diagnoses: list[str],
+    expected_codes: list[IssueCode],
+) -> None:
+    report = validate_parse_result(result(item(diagnosis=file_diagnosis)), request_diagnoses)
+
+    assert codes(report) == expected_codes
+    assert report.is_valid is True
+
+
+@pytest.mark.parametrize("remove_diagnosis", [False, True])
+def test_excel_without_optional_columns(remove_diagnosis: bool) -> None:
+    workbook = load_workbook(DATA_DIR / "sample_ok.xlsx")
+    try:
+        sheet = workbook.active
+        assert sheet is not None
+        # Удаляем справа налево, чтобы номера остальных столбцов не смещались.
+        for column in [5, 3, 2] if remove_diagnosis else [3, 2]:
+            sheet.delete_cols(column)
+        buffer = BytesIO()
+        workbook.save(buffer)
+    finally:
+        workbook.close()
+    parsed = parse_excel(buffer.getvalue())
+    before = parsed.model_dump()
+
+    report = validate_parse_result(parsed, ["Учебный диагноз"] if remove_diagnosis else None)
+
+    assert report.is_valid is True
+    assert codes(report) == ([] if remove_diagnosis else [IssueCode.MULTIPLE_DIAGNOSES])
+    assert all(row.dosage is row.quantity is None for row in parsed.items)
+    assert parsed.model_dump() == before
+
+
+@pytest.mark.parametrize(
+    ("code", "column"),
+    [
+        ("INVALID_NUMBER", "quantity"),
+        ("INVALID_QUANTITY", "quantity"),
+        ("QUANTITY_INVALID", None),
+        ("INVALID_DOSAGE", "dosage"),
+        ("INVALID_DURATION", "duration"),
+    ],
+)
+def test_unparsed_optional_values_do_not_produce_validation_warnings(
+    code: str,
+    column: str | None,
+) -> None:
+    parsed = result(item(quantity=None, dosage=None))
+    parsed.issues = [ParseIssue(code=code, message="Содержимое ячейки", row=2, column=column)]
+    before = parsed.model_dump()
+
+    report = validate_parse_result(parsed)
+
+    assert report.issues == []
+    assert parsed.model_dump() == before
+
+
+def test_missing_drug_name_column_is_critical() -> None:
+    report = validate_parse_result(result(item(drug_name=None), missing_columns=["drug_name"]))
+
+    assert codes(report) == [IssueCode.MISSING_COLUMN, IssueCode.EMPTY_DRUG_NAME]
+    assert report.critical_count == 1
+    assert report.issues[0].column == "drug_name"
+
+
+def test_bad_amount_from_excel_is_one_warning_per_row() -> None:
+    parsed = parse_excel((DATA_DIR / "sample_bad_types.xlsx").read_bytes())
+
+    report = validate_parse_result(parsed)
+
+    amount_issues = [issue for issue in report.issues if issue.column == "amount"]
+    assert len(amount_issues) == 1
+    assert amount_issues[0].code is IssueCode.INVALID_NUMBER
+    assert amount_issues[0].level is IssueLevel.WARNING
+    assert "не учитывается в долях" in amount_issues[0].message
+    assert report.is_valid is True
+
+
+def test_empty_amount_and_non_positive_amount_explain_exclusion_from_shares() -> None:
+    report = validate_parse_result(
+        result(item(amount=None), item(row_number=3, amount=Decimal("0")))
+    )
+
+    assert codes(report) == [IssueCode.EMPTY_AMOUNT, IssueCode.NON_POSITIVE_AMOUNT]
+    assert all("не учитывается в долях" in issue.message for issue in report.issues)
 
 
 def test_empty_diagnosis_is_warning_when_another_row_has_diagnosis() -> None:

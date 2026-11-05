@@ -49,3 +49,20 @@ class ValidationSettings(BaseSettings):
 def get_validation_settings() -> ValidationSettings:
     """Загрузить и закешировать настройки проверки файлов."""
     return ValidationSettings()
+
+
+class MatchingSettings(BaseSettings):
+    """Пороги нечёткого поиска; значения требуют подтверждения аналитика."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # TODO: уточнить у аналитика пороги автоматического принятия и кандидатов.
+    drug_auto_accept_threshold: float = Field(default=92, ge=0, le=100)
+    drug_candidate_threshold: float = Field(default=75, ge=0, le=100)
+    diagnosis_auto_accept_threshold: float = Field(default=92, ge=0, le=100)
+    diagnosis_candidate_threshold: float = Field(default=75, ge=0, le=100)
+
+
+@lru_cache
+def get_matching_settings() -> MatchingSettings:
+    return MatchingSettings()

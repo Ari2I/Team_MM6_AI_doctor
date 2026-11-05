@@ -53,16 +53,22 @@ def validate_file(filename: str | PathLike[str], size_bytes: int) -> ValidationR
     return ValidationReport(issues=issues)
 
 
-def _parse_issue_to_validation(issue: ParseIssue) -> ValidationIssue:
+def _parse_issue_to_validation(issue: ParseIssue) -> ValidationIssue | None:
     parse_code = issue.code.upper()
+    # Структурные замечания сохраняются, значения этих столбцов не оцениваем.
+    if parse_code in {"INVALID_QUANTITY", "QUANTITY_INVALID"} or (
+        issue.column in {"dosage", "quantity", "duration"} and parse_code != "DUPLICATE_COLUMN"
+    ):
+        return None
     if parse_code in {
         "INVALID_NUMBER",
         "INVALID_AMOUNT",
         "AMOUNT_INVALID",
-        "INVALID_QUANTITY",
-        "QUANTITY_INVALID",
     }:
-        message = "Не удалось распознать число в указанном столбце."
+        if issue.column == "amount":
+            message = "Не удалось распознать сумму. Строка не учитывается в долях."
+        else:
+            message = "Не удалось распознать число в указанном столбце."
         code = IssueCode.INVALID_NUMBER
     elif parse_code == "DUPLICATE_COLUMN":
         message = "В файле обнаружен повторяющийся столбец."
@@ -80,40 +86,31 @@ def _has_value(value: object) -> bool:
     return value is not None and (not isinstance(value, str) or bool(value.strip()))
 
 
-def _field_value(item: ParsedItem, field: str) -> object:
-    return getattr(item, field)
-
-
-def _add_numeric_issues(
+def _add_amount_issues(
     item: ParsedItem,
-    field: str,
-    empty_code: IssueCode,
-    non_positive_code: IssueCode,
     issues: list[ValidationIssue],
-    invalid_fields: set[tuple[int, str]],
+    invalid_rows: set[int],
 ) -> None:
-    value = _field_value(item, field)
-    label = _COLUMN_LABELS[field]
-    if (item.row_number, field) in invalid_fields:
+    if item.row_number in invalid_rows:
         return
-    if value is None:
+    if item.amount is None:
         issues.append(
             _issue(
                 IssueLevel.WARNING,
-                empty_code,
-                f"Не указано значение в столбце «{label}».",
+                IssueCode.EMPTY_AMOUNT,
+                "Не указана сумма. Строка не учитывается в долях.",
                 item.row_number,
-                field,
+                "amount",
             )
         )
-    elif value <= 0:
+    elif item.amount <= 0:
         issues.append(
             _issue(
                 IssueLevel.WARNING,
-                non_positive_code,
-                f"Значение в столбце «{label}» должно быть больше нуля.",
+                IssueCode.NON_POSITIVE_AMOUNT,
+                "Сумма должна быть больше нуля. Строка не учитывается в долях.",
                 item.row_number,
-                field,
+                "amount",
             )
         )
 
@@ -129,10 +126,18 @@ def _duplicate_items(items: list[ParsedItem]) -> list[int]:
     return duplicates
 
 
-def validate_parse_result(parse_result: ParseResult) -> ValidationReport:
-    """Проверить структурный результат парсера и вернуть русские сообщения."""
+def validate_parse_result(
+    parse_result: ParseResult, request_diagnoses: list[str] | None = None
+) -> ValidationReport:
+    """Проверить результат парсера без изменения исходных значений.
+
+    Диагнозы запроса относятся ко всей заявке. Пустые строки не считаются
+    диагнозами; повторы после strip/casefold учитываются один раз.
+    """
     issues: list[ValidationIssue] = []
     for column in parse_result.missing_columns:
+        if column in {"dosage", "quantity", "diagnosis"}:
+            continue
         label = _COLUMN_LABELS.get(column, column)
         issues.append(
             _issue(
@@ -148,31 +153,41 @@ def validate_parse_result(parse_result: ParseResult) -> ValidationReport:
             _issue(IssueLevel.CRITICAL, IssueCode.NO_DATA, "В заявке нет строк с данными.")
         )
 
-    if not any(_has_value(item.diagnosis) for item in parse_result.items):
+    file_diagnoses = {
+        str(item.diagnosis).strip().casefold()
+        for item in parse_result.items
+        if _has_value(item.diagnosis)
+    }
+    external_diagnoses = {
+        diagnosis.strip().casefold()
+        for diagnosis in (request_diagnoses or [])
+        if _has_value(diagnosis)
+    }
+    if not file_diagnoses and not external_diagnoses:
         issues.append(
             _issue(
                 IssueLevel.CRITICAL,
                 IssueCode.NO_DIAGNOSIS,
-                "Диагноз не указан ни в одной строке.",
+                "Диагноз не указан ни в файле, ни в запросе.",
             )
         )
 
-    invalid_fields: set[tuple[int, str]] = set()
+    invalid_amount_rows: set[int] = set()
     for parse_issue in parse_result.issues:
         validation_issue = _parse_issue_to_validation(parse_issue)
-        issues.append(validation_issue)
+        if validation_issue is not None:
+            issues.append(validation_issue)
         if (
             parse_issue.code.upper()
             in {
                 "INVALID_NUMBER",
                 "INVALID_AMOUNT",
                 "AMOUNT_INVALID",
-                "INVALID_QUANTITY",
-                "QUANTITY_INVALID",
             }
+            and parse_issue.column == "amount"
             and parse_issue.row is not None
         ):
-            invalid_fields.add((parse_issue.row, parse_issue.column or ""))
+            invalid_amount_rows.add(parse_issue.row)
 
     for item in parse_result.items:
         if not _has_value(item.drug_name):
@@ -185,35 +200,8 @@ def validate_parse_result(parse_result: ParseResult) -> ValidationReport:
                     "drug_name",
                 )
             )
-        _add_numeric_issues(
-            item,
-            "amount",
-            IssueCode.EMPTY_AMOUNT,
-            IssueCode.NON_POSITIVE_AMOUNT,
-            issues,
-            invalid_fields,
-        )
-        _add_numeric_issues(
-            item,
-            "quantity",
-            IssueCode.EMPTY_QUANTITY,
-            IssueCode.NON_POSITIVE_QUANTITY,
-            issues,
-            invalid_fields,
-        )
-        if not _has_value(item.dosage):
-            issues.append(
-                _issue(
-                    IssueLevel.WARNING,
-                    IssueCode.EMPTY_DOSAGE,
-                    "Не указана дозировка.",
-                    item.row_number,
-                    "dosage",
-                )
-            )
-        if not _has_value(item.diagnosis) and any(
-            _has_value(other.diagnosis) for other in parse_result.items
-        ):
+        _add_amount_issues(item, issues, invalid_amount_rows)
+        if not _has_value(item.diagnosis) and file_diagnoses and not external_diagnoses:
             issues.append(
                 _issue(
                     IssueLevel.WARNING,
@@ -224,11 +212,7 @@ def validate_parse_result(parse_result: ParseResult) -> ValidationReport:
                 )
             )
 
-    diagnoses = {
-        str(item.diagnosis).strip().casefold()
-        for item in parse_result.items
-        if _has_value(item.diagnosis)
-    }
+    diagnoses = file_diagnoses | external_diagnoses
     if len(diagnoses) > 1:
         issues.append(
             _issue(
