@@ -1,3 +1,4 @@
+from .corpus import Corpus
 from dataclasses import dataclass
 from typing import Optional
 from .contracts import AnalysisItem
@@ -98,24 +99,68 @@ def match_original(
     }
 
 
+@dataclass(frozen=True)
+class CategoryResult:
+    """Результат поиска категории в базе."""
+
+    category: Optional[str]
+    reason: Optional[str]
+    source_refs: tuple[str, ...]
+    status: str  # FOUND / NO_RULE / CONFLICT
+
+
+def classify_category(inn: str, diagnosis: str, corpus: Corpus) -> CategoryResult:
+    """Ищет категорию для пары «МНН + диагноз» в корпусе."""
+
+    found = set()
+    for fragment in corpus.fragments:
+        # Условные записи (нужен контекст) пока пропускаем.
+        if fragment.required_context:
+            continue
+        if normalize_name(fragment.inn) != normalize_name(inn):
+            continue
+        if normalize_name(fragment.diagnosis) != normalize_name(diagnosis):
+            continue
+        for assertion in fragment.assertions:
+            if assertion.kind == "CATEGORY":
+                found.add((assertion.category, assertion.upstream_reason, fragment.source_id))
+
+    if not found:
+        return CategoryResult(None, None, (), "NO_RULE")
+    if len({(category, reason) for category, reason, _ in found}) > 1:
+        return CategoryResult(None, None, (), "CONFLICT")
+
+    category, reason, _ = next(iter(found))
+    refs = tuple(sorted({source for _, _, source in found}))
+    return CategoryResult(category, reason, refs, "FOUND")
+
+
 def build_analysis_item(
     item_id: str,
     original: dict[str, object],
     reference: list[MedicineReference],
+    diagnosis: Optional[str] = None,
+    corpus: Optional[Corpus] = None,
 ) -> AnalysisItem:
-    """Создаёт AnalysisItem с результатом сопоставления торгового названия."""
+    """Создаёт AnalysisItem: МНН из справочника и категория из базы."""
 
     match = match_original(original, reference)
-
-    if match["inn"] is None:
-        classification_reason = None
-        category = None
-    else:
-        # Найдено МНН, но категорию мы пока не классифицируем.
-        classification_reason = None
-        category = None
-
+    category = None
+    classification_reason = None
+    source_refs = list(match["source_refs"])
     missing_data = list(match["missing_data"])
+    upstream_status = match["upstream_status"]
+
+    if match["inn"] is not None and diagnosis is not None and corpus is not None:
+        result = classify_category(match["inn"], diagnosis, corpus)
+        if result.status == "FOUND":
+            category = result.category
+            classification_reason = result.reason
+            source_refs = list(result.source_refs)
+        else:
+            # Основания нет или оно противоречиво: ничего не придумываем.
+            upstream_status = "PARTIAL"
+            missing_data.append("category" if result.status == "NO_RULE" else "category_conflict")
 
     return AnalysisItem(
         item_id=item_id,
@@ -128,7 +173,7 @@ def build_analysis_item(
             "reason": None,
             "missing_data": [],
         },
-        source_refs=match["source_refs"],
-        upstream_status=match["upstream_status"],
+        source_refs=source_refs,
+        upstream_status=upstream_status,
         missing_data=missing_data,
     )

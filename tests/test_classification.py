@@ -104,3 +104,65 @@ def test_build_analysis_item_creates_valid_demo_item():
     assert item.category is None
     assert item.dosage_check.status == "NOT_CHECKED"
     assert item.missing_data == []
+
+import json
+from pathlib import Path
+
+from llm_rag.classification import MedicineReference, build_analysis_item
+from llm_rag.corpus import Corpus
+
+
+def _load_demo_corpus() -> Corpus:
+    path = Path(__file__).parent.parent / "examples" / "corpus.json"
+    return Corpus.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _original(name: str) -> dict:
+    return {
+        "trade_name": name,
+        "dosage": "демо-строка",
+        "quantity": 1,
+        "amount": "100.00",
+        "currency": "RUB",
+    }
+
+
+REFERENCE = [
+    MedicineReference("Демо-А", "демо-вещество-а"),
+    MedicineReference("Нет основания", "демо-вне-корпуса"),
+]
+
+
+def test_confirmed_position_takes_category_and_reason_from_corpus():
+    item = build_analysis_item(
+        "row-1", _original("Демо-А"), REFERENCE,
+        diagnosis="Демо-диагноз", corpus=_load_demo_corpus(),
+    )
+    assert item.inn == "демо-вещество-а"
+    assert item.category == "А"
+    assert item.classification_reason == "Основная терапия в тестовом перечне."
+    assert item.source_refs == ["master-demo"]
+    assert item.upstream_status == "PROCESSED"
+
+
+def test_unknown_drug_has_no_category():
+    item = build_analysis_item(
+        "row-2", _original("Неизвестный демо-препарат"), REFERENCE,
+        diagnosis="Демо-диагноз", corpus=_load_demo_corpus(),
+    )
+    assert item.inn is None
+    assert item.category is None
+    assert item.upstream_status == "PARTIAL"
+    assert "inn" in item.missing_data
+
+
+def test_no_rule_in_corpus_gives_warning_instead_of_guess():
+    item = build_analysis_item(
+        "row-3", _original("Нет основания"), REFERENCE,
+        diagnosis="Демо-диагноз", corpus=_load_demo_corpus(),
+    )
+    assert item.inn == "демо-вне-корпуса"
+    assert item.category is None
+    assert item.classification_reason is None
+    assert item.upstream_status == "PARTIAL"
+    assert "category" in item.missing_data
