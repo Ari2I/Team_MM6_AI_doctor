@@ -38,6 +38,7 @@ def upgrade() -> None:
         op.drop_column("application_items", column)
     op.add_column("application_items", sa.Column("match_confidence", sa.Float(), nullable=True))
     op.add_column("application_items", sa.Column("match_note", sa.Text(), nullable=True))
+    op.add_column("application_items", sa.Column("diagnosis", sa.Text(), nullable=True))
 
     op.drop_column("applications", "secretary_decision")
     op.add_column(
@@ -85,6 +86,7 @@ def downgrade() -> None:
     op.add_column("applications", sa.Column("secretary_decision", sa.Text(), nullable=True))
 
     op.drop_column("application_items", "match_note")
+    op.drop_column("application_items", "diagnosis")
     op.drop_column("application_items", "match_confidence")
     op.add_column("application_items", sa.Column("diagnosis_id", sa.Uuid(), nullable=True))
     op.add_column(

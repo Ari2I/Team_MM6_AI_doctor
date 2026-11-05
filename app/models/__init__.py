@@ -9,6 +9,7 @@ from app.models.application import (
     ValidationIssue,
 )
 from app.models.enums import ApplicationStatus, DrugCategory, ReviewReason, TrafficLight
+from app.models.reference import ReferenceDiagnosis, ReferenceDrug, ReferenceRule, ReferenceVersion
 
 __all__ = [
     "Application",
@@ -21,4 +22,8 @@ __all__ = [
     "ReviewReason",
     "TrafficLight",
     "ValidationIssue",
+    "ReferenceVersion",
+    "ReferenceDrug",
+    "ReferenceDiagnosis",
+    "ReferenceRule",
 ]

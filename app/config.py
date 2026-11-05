@@ -66,3 +66,29 @@ class MatchingSettings(BaseSettings):
 @lru_cache
 def get_matching_settings() -> MatchingSettings:
     return MatchingSettings()
+
+
+class TrafficLightSettings(BaseSettings):
+    """Пороги светофора; значения требуют подтверждения аналитика."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # TODO: уточнить у аналитика остальные правила жёлтого и красного.
+    green_category_a_threshold: float = Field(default=80.0, ge=0, le=100)
+    undetermined_share_threshold: float = Field(default=50.0, ge=0, le=100)
+
+
+@lru_cache
+def get_traffic_light_settings() -> TrafficLightSettings:
+    return TrafficLightSettings()
+
+
+class LLMSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    provider: str = "template"
+
+
+@lru_cache
+def get_llm_settings() -> LLMSettings:
+    return LLMSettings()

@@ -35,6 +35,7 @@ class ApplicationItemSchema(BaseModel):
     application_id: UUID
     row_number: int
     drug_name: str | None = None
+    diagnosis: str | None = None
     dosage: str | None = None
     quantity: Decimal | None = None
     amount: Decimal | None = None

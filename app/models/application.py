@@ -81,6 +81,7 @@ class ApplicationItem(Base):
     row_number: Mapped[int]
     # Пустые/неразобранные ячейки допустимы: валидатор возвращает предупреждения.
     drug_name: Mapped[str | None] = mapped_column(Text)
+    diagnosis: Mapped[str | None] = mapped_column(Text)
     dosage: Mapped[str | None] = mapped_column(Text)
     quantity: Mapped[Decimal | None] = mapped_column(Numeric())
     amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
