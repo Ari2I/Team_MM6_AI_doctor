@@ -9,10 +9,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import Application, ApplicationDiagnosis, ApplicationItem, ApplicationStatus, ItemCheck
 from app.models.application import ValidationIssue
-from app.schemas.demo_result import ApplicationResult, CheckResult, DiagnosisSummary, ItemResult
+from app.schemas.demo_result import (
+    OFFICIAL_DISCLAIMER, ApplicationResult, CheckResult, DiagnosisSummary, ItemResult,
+)
 from app.schemas.parsing import ParseResult
 from app.schemas.validation import IssueCode, IssueLevel, ValidationReport
 from app.services.analysis import AnalysisError, analyze_application
+from app.services.official_analysis import analyze_official
+from app.services.official_reference import OfficialIndex
 from app.services.rag_adapter import evidence_json, get_pipeline, live_results, verify_pair
 from app.services.reference_seed import CATEGORIES, load_bundle
 from app.services.summary import build_summary, build_warning_message, category_shares, compute_traffic_light
@@ -89,9 +93,9 @@ def verifier_for(application: Application, bundle=None):
 
 def save_and_analyze(
     session: Session, filename: str, parsed: ParseResult, diagnoses: list[str],
-    report: ValidationReport,
+    report: ValidationReport, *, official: OfficialIndex | None = None,
 ):
-    bundle = load_bundle()
+    bundle = None if official is not None else load_bundle()
     application = Application(
         filename=filename, status=ApplicationStatus.PARSED, demo_meta={},
         diagnoses=[ApplicationDiagnosis(name=name) for name in diagnoses],
@@ -102,8 +106,12 @@ def save_and_analyze(
     session.flush()
     try:
         with session.begin_nested():
-            verify, jobs = verifier_for(application, bundle)
-            analyze_application(session, application.id, demo=True, verify=verify, commit=False)
+            jobs = {}
+            if official is not None:
+                analyze_official(session, application, official)
+            else:
+                verify, jobs = verifier_for(application, bundle)
+                analyze_application(session, application.id, demo=True, verify=verify, commit=False)
     except (AnalysisError, SQLAlchemyError, ValueError, OSError):
         application.status = ApplicationStatus.ERROR
         application.requires_review = True
@@ -197,12 +205,15 @@ def load_result(session: Session, application_id: UUID) -> ApplicationResult | N
     ) for row in raw_checks]
     candidates = {row.item_id: row.evidence["match_candidates"]
                   for row in raw_checks if row.evidence.get("match_candidates")}
+    details = application.demo_meta.get('official_item_details', {})
     items = [ItemResult(
         item_id=row.id, row_number=row.row_number, drug_name=row.drug_name, diagnosis=row.diagnosis,
         dosage=row.dosage, quantity=row.quantity, amount=row.amount, mnn=row.mnn,
         original_cells=row.original_cells or {}, match_candidates=candidates.get(row.id, []),
+        official_drug=details.get(str(row.id)),
     ) for row in raw_items]
     issues = sorted(application.validation_issues, key=lambda row: (row.row or 0, row.code, row.column or ""))
+    official = application.demo_meta.get('reference_profile') == 'official'
     return ApplicationResult(
         application_id=application.id, filename=application.filename, status=application.status,
         diagnoses=[{"diagnosis_id": row.id, "name": row.name} for row in diagnoses],
@@ -212,5 +223,8 @@ def load_result(session: Session, application_id: UUID) -> ApplicationResult | N
         summary_by_diagnosis=[_summary(diag, [c for c in checks if c.diagnosis_id == diag.id], items)
                               for diag in diagnoses],
         known_total=sum((row.amount for row in items if row.amount is not None), Decimal("0")).quantize(CENT),
-        requires_review=application.requires_review, **application.demo_meta,
+        requires_review=application.requires_review,
+        is_demo=not official,
+        **({'disclaimer': OFFICIAL_DISCLAIMER} if official else {}),
+        **application.demo_meta,
     )

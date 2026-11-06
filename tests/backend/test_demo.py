@@ -42,6 +42,7 @@ def client(monkeypatch):
             seed_reference(session, load_bundle())
             seed_reference(session, load_bundle())
         monkeypatch.setattr(applications, "sessions", lambda: sessions)
+        monkeypatch.setattr(applications, "official_path", lambda: None)
         with TestClient(app) as test_client:
             yield test_client
     finally:

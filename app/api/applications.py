@@ -25,6 +25,7 @@ from app.services.application_io import (
 from app.services.excel_parser import ExcelParseError, parse_excel
 from app.services.export import build_html, build_xlsx
 from app.services.reference_seed import DEMO_FILE, load_bundle
+from app.services.official_reference import load_official, official_path
 from app.services.validator import validate_file, validate_parse_result
 from app.services.workbook_limits import WorkbookTooLarge, check_sheet_bounds
 
@@ -76,6 +77,23 @@ def readiness():
     return {"status": "ready", "reference_version": bundle.reference_version}
 
 
+@router.get("/references")
+def reference_availability():
+    path = official_path()
+    if path is None:
+        return {"official": None, "default": "demo"}
+    try:
+        snapshot = load_official(path).snapshot
+    except (ValueError, OSError):
+        return {"official": None, "default": "demo", "official_error": "Справочник недоступен."}
+    return {
+        "official": {"version": snapshot.version, "coverage": snapshot.coverage,
+                     "as_of": snapshot.as_of, "registrations": len(snapshot.registrations),
+                     "evidence": len(snapshot.evidence), "compositions": len(snapshot.compositions)},
+        "default": "official" if snapshot.coverage != "historical" else "demo",
+    }
+
+
 @router.get("/demo.xlsx")
 def demo_file():
     return FileResponse(DEMO_FILE, media_type=XLSX, filename="demo.xlsx")
@@ -85,6 +103,7 @@ def demo_file():
 def create_application(
     file: Annotated[UploadFile, File()],
     mode: Annotated[Literal["offline", "gigachat"], Form()] = "offline",
+    reference: Annotated[Literal["demo", "official"] | None, Form()] = None,
 ):
     limit = get_validation_settings().max_excel_size_bytes
     filename = PurePath((file.filename or "").replace("\\", "/")).name.replace("\x00", "")[:255]
@@ -116,10 +135,26 @@ def create_application(
     if not report.is_valid:
         reject(422, *(i.model_dump(mode="json") for i in report.issues))
     validate_amounts(parsed, report)
+    path = official_path()
+    use_official = reference == "official" or (reference is None and path is not None and mode == "offline")
+    if reference == "official" and mode == "gigachat":
+        reject(422, issue("official_offline_only", "Проверка по официальному справочнику выполняется локально."))
+    official = None
+    if use_official:
+        try:
+            if path is None:
+                raise FileNotFoundError
+            official = load_official(path)
+            if reference is None and official.snapshot.coverage == "historical":
+                official = None
+        except (ValueError, OSError):
+            reject(503, issue("official_reference_unavailable", "Загрузите проверенный снимок официального справочника."))
     try:
         factory = sessions()
         with factory.begin() as session:
-            application_id, run_id, jobs, bundle = save_and_analyze(session, filename, parsed, diagnoses, report)
+            application_id, run_id, jobs, bundle = save_and_analyze(
+                session, filename, parsed, diagnoses, report, official=official,
+            )
     except (SQLAlchemyError, AnalysisError, ValueError, OSError) as error:
         logger.warning("Анализ не завершён (%s).", type(error).__name__)
         reject(503, issue("analysis_unavailable", "Анализ недоступен. Проверьте БД и справочник демо."))

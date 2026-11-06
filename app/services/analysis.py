@@ -75,6 +75,22 @@ def analyze_application(
     application = session.get(Application, application_id, with_for_update=True)
     if application is None:
         raise AnalysisError("Заявка не найдена.")
+    if (application.demo_meta or {}).get("reference_profile") == "official":
+        from app.services.official_analysis import analyze_official
+        from app.services.official_reference import load_official, official_path
+
+        try:
+            path = official_path()
+            if path is None:
+                raise AnalysisError("Официальный справочник недоступен.")
+            analyze_official(session, application, load_official(path))
+            if commit:
+                session.commit()
+            return application
+        except Exception:
+            if commit:
+                session.rollback()
+            raise
     demo = application.demo_meta is not None if demo is None else demo
     try:
         snapshot = _load_snapshot(session)
