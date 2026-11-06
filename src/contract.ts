@@ -32,6 +32,8 @@ export type Check = {
   review_sources: Citation[]
   relationship_found: boolean
   evidence_conditions: string[]
+  rule_ids: string[]
+  model_highlight: Citation | null
   effective_mode: Mode
   retrieval: 'lexical' | 'vector'
   fallback_reason: string | null
@@ -58,7 +60,8 @@ export type Result = {
   official_coverage: 'registry_export' | 'limited' | 'historical' | null
   application_id: string
   filename: string
-  diagnoses: { diagnosis_id: string; name: string }[]
+  sheet_name: string | null
+  diagnoses: { diagnosis_id: string; name: string; source_row: number | null }[]
   items: Purchase[]
   checks: Check[]
   issues: Issue[]
@@ -72,6 +75,10 @@ export type Result = {
     pair_count: number
   }[]
   known_total: string
+  amounts_total: Partial<Record<Category | 'undetermined', string>>
+  recommendation: string | null
+  model_summary: Citation[]
+  model_attempted: boolean
   reference_version: string
   corpus_version: string
   effective_mode: Mode
