@@ -22,9 +22,10 @@ def test_official_http_result_is_saved_and_exported(client, monkeypatch, tmp_pat
 
     assert client.get("/api/references").json()["default"] == "official"
     book = Workbook()
-    book.active.append(["Торговое наименование", "Диагноз", "Сумма"])
-    book.active.append(["Независимый тестовый препарат", "G43.9; Z99.9", 999.75])
-    book.active.append(["Вымышленное неизвестное 20261107", None, 0.25])
+    book.active.append(["Торговое наименование", "Диагноз", "Сумма", "Дозировка", "Количество"])
+    book.active.append(["Независимый тестовый препарат", "G43.9", 900, None, 1])
+    book.active.append(["Вымышленное неизвестное 20261107", None, 0.25, None, 1])
+    book.active.append(["Независимый тестовый препарат", "Z99.9", 99.75, None, 1])
     buffer = BytesIO()
     book.save(buffer)
     upload = {"file": ("любое-имя.xlsx", buffer.getvalue())}
@@ -34,7 +35,7 @@ def test_official_http_result_is_saved_and_exported(client, monkeypatch, tmp_pat
     assert result["reference_profile"] == "official"
     assert result["is_demo"] is False
     assert result["known_total"] == "1000.00"
-    assert len(result["checks"]) == 4
+    assert len(result["checks"]) == 3
     assert all(row["category"] is None and row["needs_review"] for row in result["checks"])
     assert sum(row["relationship_found"] for row in result["checks"]) == 1
     assert result["items"][0]["official_drug"]["compositions"][0]["registration"] == "TEST-1"
@@ -48,7 +49,7 @@ def test_official_http_result_is_saved_and_exported(client, monkeypatch, tmp_pat
     with applications.sessions().begin() as session:
         application_id = UUID(result['application_id'])
         analyze_application(session, application_id, commit=False)
-        assert len(saved_checks(session, application_id)) == 4
+        assert len(saved_checks(session, application_id)) == 3
 
 
 def test_generator_needs_no_registry_and_is_reproducible(tmp_path, monkeypatch):

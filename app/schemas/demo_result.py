@@ -20,6 +20,7 @@ OFFICIAL_DISCLAIMER = "Отчёт содержит сведения из заг�
 class DiagnosisResult(BaseModel):
     diagnosis_id: UUID
     name: str
+    source_row: int | None = None
 
 
 class ItemResult(BaseModel):
@@ -77,6 +78,8 @@ class CheckResult(BaseModel):
     citations: list[SourceCitation] = Field(default_factory=list)
     review_sources: list[SourceCitation] = Field(default_factory=list)
     evidence_conditions: list[str] = Field(default_factory=list)
+    rule_ids: list[str] = Field(default_factory=list)
+    model_highlight: SourceCitation | None = None
     relationship_found: bool = False
     effective_mode: Mode
     retrieval: Literal["lexical", "vector"]
@@ -98,6 +101,7 @@ class DiagnosisSummary(BaseModel):
 class ApplicationResult(BaseModel):
     application_id: UUID
     filename: str
+    sheet_name: str | None = None
     status: ApplicationStatus
     diagnoses: list[DiagnosisResult]
     items: list[ItemResult]
@@ -106,6 +110,11 @@ class ApplicationResult(BaseModel):
     summary_by_diagnosis: list[DiagnosisSummary]
     known_total: Decimal
     requires_review: bool
+    amounts_total: dict[str, Decimal] = Field(default_factory=dict)
+    recommendation: str | None = None
+    model_summary: list[SourceCitation] = Field(default_factory=list)
+    model_attempted: bool = False
+    approved_rule_count: int | None = None
     reference_version: str
     corpus_version: str
     effective_mode: Mode

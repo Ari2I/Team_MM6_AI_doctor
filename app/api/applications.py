@@ -2,6 +2,7 @@
 
 from hashlib import sha256
 from io import BytesIO
+import json
 import logging
 from xml.etree.ElementTree import ParseError
 from pathlib import PurePath
@@ -22,9 +23,10 @@ from app.services.application_io import (
     MAX_DIAGNOSES, MAX_ITEMS, application_diagnoses, enrich_saved_application,
     load_result, save_and_analyze, validate_amounts,
 )
-from app.services.excel_parser import ExcelParseError, parse_excel
+from app.services.excel_parser import ExcelLayoutChoice, ExcelParseError, parse_excel
 from app.services.export import build_html, build_xlsx
 from app.services.reference_seed import DEMO_FILE, load_bundle
+from app.services.official_explanation import enrich_official, gigachat_settings
 from app.services.official_reference import load_official, official_path
 from app.services.validator import validate_file, validate_parse_result
 from app.services.workbook_limits import WorkbookTooLarge, check_sheet_bounds
@@ -63,18 +65,26 @@ def read_application(application_id: UUID) -> ApplicationResult:
 @router.get("/ready")
 def readiness():
     try:
-        bundle = load_bundle()
+        path = official_path()
+        bundle = load_bundle() if path is None else None
+        official = load_official(path).snapshot if path is not None else None
         with sessions()() as session:
-            active = session.scalars(select(ReferenceVersion).where(ReferenceVersion.is_active)).all()
-            if len(active) != 1 or active[0].fingerprint != bundle.content_digest:
-                reject(503, issue("reference_unavailable", "Активируйте справочник демо."))
+            if bundle is not None:
+                active = session.scalars(select(ReferenceVersion).where(ReferenceVersion.is_active)).all()
+                if len(active) != 1 or active[0].fingerprint != bundle.content_digest:
+                    reject(503, issue("reference_unavailable", "Активируйте справочник демо."))
             # Проверяется наличие таблиц результата и новых колонок миграции.
             from app.models.application import Application, ItemCheck
             session.execute(select(Application.demo_meta).limit(0))
             session.execute(select(ItemCheck.evidence).limit(0))
     except (SQLAlchemyError, ValueError, OSError):
         reject(503, issue("storage_unavailable", "Проверьте БД, миграции и справочник."))
-    return {"status": "ready", "reference_version": bundle.reference_version}
+    if official is None:
+        return {"status": "ready", "reference_version": bundle.reference_version}
+    config = gigachat_settings()
+    return {"status": "ready", "reference_version": official.version,
+            "gigachat_b2b_configured": bool(config["GIGACHAT_CREDENTIALS"]) != bool(config["GIGACHAT_ACCESS_TOKEN"]),
+            "approved_rules": len(official.rules)}
 
 
 @router.get("/references")
@@ -89,8 +99,12 @@ def reference_availability():
     return {
         "official": {"version": snapshot.version, "coverage": snapshot.coverage,
                      "as_of": snapshot.as_of, "registrations": len(snapshot.registrations),
-                     "evidence": len(snapshot.evidence), "compositions": len(snapshot.compositions)},
-        "default": "official" if snapshot.coverage != "historical" else "demo",
+                     "evidence": len(snapshot.evidence), "compositions": len(snapshot.compositions),
+                     "diagnoses": len(snapshot.diagnoses),
+                     "documents": len({row.source.url for row in snapshot.documents}),
+                     "indexed_documents": len({page.url for page in snapshot.pages}),
+                     "rules": len(snapshot.rules)},
+        "default": "official",
     }
 
 
@@ -102,8 +116,10 @@ def demo_file():
 @router.post("/applications", response_model=ApplicationResult, status_code=201)
 def create_application(
     file: Annotated[UploadFile, File()],
-    mode: Annotated[Literal["offline", "gigachat"], Form()] = "offline",
+    mode: Annotated[Literal["offline", "gigachat"] | None, Form()] = None,
     reference: Annotated[Literal["demo", "official"] | None, Form()] = None,
+    sheet: Annotated[str | None, Form()] = None,
+    columns: Annotated[str | None, Form()] = None,
 ):
     limit = get_validation_settings().max_excel_size_bytes
     filename = PurePath((file.filename or "").replace("\\", "/")).name.replace("\x00", "")[:255]
@@ -112,41 +128,46 @@ def create_application(
     if not report.is_valid:
         reject(413 if any(i.code == "file_too_large" for i in report.issues) else 422,
                *(i.model_dump(mode="json") for i in report.issues))
-    if mode == "gigachat" and sha256(content).hexdigest() != DEMO_SHA256:
+    path = official_path()
+    use_official = reference == "official" or (reference is None and path is not None)
+    if not use_official and mode == "gigachat" and sha256(content).hexdigest() != DEMO_SHA256:
         reject(422, issue("unapproved_demo_file", "Для GigaChat загрузите исходный файл «Демо Excel»."))
+    try:
+        selected_columns = json.loads(columns) if columns else {}
+        if not isinstance(selected_columns, dict) or any(type(value) is not int for value in selected_columns.values()):
+            raise ValueError()
+    except ValueError:
+        reject(422, issue("invalid_layout", "Сопоставление столбцов недействительно."))
     try:
         with ZipFile(BytesIO(content)) as archive:
             entries = archive.infolist()
             if len(entries) > 1000 or sum(entry.file_size for entry in entries) > MAX_EXPANDED_SIZE:
                 reject(413, issue("workbook_too_large", "Внутренний объём книги превышает лимит."))
             check_sheet_bounds(archive)
-        parsed = parse_excel(content, demo=True)
+        parsed = parse_excel(content, demo=True, diagnosis_blocks=use_official,
+                             sheet=sheet if use_official else None, column_choices=selected_columns)
+    except ExcelLayoutChoice as error:
+        raise HTTPException(409, detail={"layout": error.options}) from None
     except WorkbookTooLarge:
         reject(413, issue("workbook_too_large", "Координаты ячеек превышают размеры шаблона демо."))
     except (BadZipFile, ParseError, KeyError, RuntimeError, ValueError):
         reject(422, issue("invalid_xlsx", "Не удалось открыть файл Excel."))
     except ExcelParseError as error:
         reject(422, issue("invalid_xlsx", str(error)))
-    diagnoses = application_diagnoses(parsed)
+    diagnoses = list(parsed.diagnosis_blocks.values()) if use_official else application_diagnoses(parsed)
     if len(parsed.items) > MAX_ITEMS or len(diagnoses) > MAX_DIAGNOSES:
         reject(413, issue("application_too_large",
                           f"Допустимо до {MAX_ITEMS} покупок и {MAX_DIAGNOSES} диагнозов."))
-    report = validate_parse_result(parsed, request_diagnoses=diagnoses, demo=True)
+    report = validate_parse_result(parsed, request_diagnoses=diagnoses, demo=True, blocked=use_official)
     if not report.is_valid:
         reject(422, *(i.model_dump(mode="json") for i in report.issues))
     validate_amounts(parsed, report)
-    path = official_path()
-    use_official = reference == "official" or (reference is None and path is not None and mode == "offline")
-    if reference == "official" and mode == "gigachat":
-        reject(422, issue("official_offline_only", "Проверка по официальному справочнику выполняется локально."))
     official = None
     if use_official:
         try:
             if path is None:
                 raise FileNotFoundError
             official = load_official(path)
-            if reference is None and official.snapshot.coverage == "historical":
-                official = None
         except (ValueError, OSError):
             reject(503, issue("official_reference_unavailable", "Загрузите проверенный снимок официального справочника."))
     try:
@@ -163,9 +184,12 @@ def create_application(
             'application_id': str(application_id),
             'issues': [issue('analysis_unavailable', 'Анализ недоступен. Проверьте справочник демо.')],
         })
-    if mode == "gigachat":
+    if (use_official and mode != "offline") or mode == "gigachat":
         try:
-            enrich_saved_application(factory, application_id, run_id, jobs, bundle)
+            if use_official:
+                enrich_official(factory, application_id, run_id)
+            else:
+                enrich_saved_application(factory, application_id, run_id, jobs, bundle)
         except SQLAlchemyError:
             logger.warning("Обогащение результата не записано, локальная проверка сохранена.")
     return read_application(application_id)

@@ -70,7 +70,7 @@ def _parse_issue_to_validation(issue: ParseIssue) -> ValidationIssue | None:
         else:
             message = "Не удалось распознать число в указанном столбце."
         code = IssueCode.INVALID_NUMBER
-    elif parse_code == "REPEATED_HEADER":
+    elif parse_code in {"REPEATED_HEADER", "AMOUNT_FORMULA_NO_CACHE"}:
         message = issue.message
         code = IssueCode.PARSE_ISSUE
     elif parse_code == "DUPLICATE_COLUMN":
@@ -118,11 +118,11 @@ def _add_amount_issues(
         )
 
 
-def _duplicate_items(items: list[ParsedItem]) -> list[int]:
+def _duplicate_items(items: list[ParsedItem], item_blocks: dict[int, int]) -> list[int]:
     seen: dict[tuple[object, ...], int] = {}
     duplicates: list[int] = []
     for item in items:
-        key = (item.drug_name, item.dosage, item.quantity, item.amount)
+        key = (item_blocks.get(item.row_number), item.drug_name, item.dosage, item.quantity, item.amount)
         first_row = seen.setdefault(key, item.row_number)
         if first_row != item.row_number:
             duplicates.append(item.row_number)
@@ -130,7 +130,8 @@ def _duplicate_items(items: list[ParsedItem]) -> list[int]:
 
 
 def validate_parse_result(
-    parse_result: ParseResult, request_diagnoses: list[str] | None = None, *, demo: bool = False
+    parse_result: ParseResult, request_diagnoses: list[str] | None = None, *, demo: bool = False,
+    blocked: bool = False,
 ) -> ValidationReport:
     """Проверить результат парсера без изменения исходных значений.
 
@@ -139,7 +140,7 @@ def validate_parse_result(
     """
     issues: list[ValidationIssue] = []
     for column in parse_result.missing_columns:
-        if column in {"dosage", "quantity", "diagnosis"}:
+        if not blocked and column in {"dosage", "quantity", "diagnosis"}:
             continue
         label = _COLUMN_LABELS.get(column, column)
         issues.append(
@@ -167,7 +168,7 @@ def validate_parse_result(
         if _has_value(diagnosis)
     }
     diagnoses = external_diagnoses if demo else file_diagnoses | external_diagnoses
-    if not diagnoses:
+    if not diagnoses and not blocked:
         issues.append(
             _issue(
                 IssueLevel.CRITICAL,
@@ -187,6 +188,7 @@ def validate_parse_result(
                 "INVALID_NUMBER",
                 "INVALID_AMOUNT",
                 "AMOUNT_INVALID",
+                "AMOUNT_FORMULA_NO_CACHE",
             }
             and parse_issue.column == "amount"
             and parse_issue.row is not None
@@ -205,7 +207,8 @@ def validate_parse_result(
                 )
             )
         _add_amount_issues(item, issues, invalid_amount_rows)
-        if not _has_value(item.diagnosis) and file_diagnoses and not external_diagnoses:
+        if (blocked and parse_result.item_blocks.get(item.row_number) == 0
+                or not blocked and not _has_value(item.diagnosis) and file_diagnoses and not external_diagnoses):
             issues.append(
                 _issue(
                     IssueLevel.WARNING,
@@ -226,7 +229,7 @@ def validate_parse_result(
             )
         )
 
-    for row_number in _duplicate_items(parse_result.items):
+    for row_number in _duplicate_items(parse_result.items, parse_result.item_blocks):
         issues.append(
             _issue(
                 IssueLevel.WARNING,

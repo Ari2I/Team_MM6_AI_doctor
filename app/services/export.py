@@ -56,6 +56,14 @@ def _format(sheet, widths):
             cell.alignment = Alignment(vertical="top", wrap_text=True)
 
 
+def _status(row):
+    if row.reason_code.startswith("OFFICIAL_"):
+        if row.category:
+            return "Правило применено"
+        return "Требуется сверка" if row.relationship_found else row.explanation
+    return STATUS[row.evidence_status]
+
+
 def build_xlsx(result: ApplicationResult) -> bytes:
     workbook = Workbook()
     application = workbook.active
@@ -63,27 +71,30 @@ def build_xlsx(result: ApplicationResult) -> bytes:
     checks = workbook.create_sheet("Проверка")
     sources = workbook.create_sheet("Источники")
     summary = workbook.create_sheet("Сводка")
-    names = {diag.diagnosis_id: diag.name for diag in result.diagnoses}
+    names = {diag.diagnosis_id: f"{diag.name} · строка {diag.source_row}" if diag.source_row else diag.name
+             for diag in result.diagnoses}
     items = {item.item_id: item for item in result.items}
     _append(application, ["Строка", "Препарат", "МНН", "Диагноз (ячейка)", "Дозировка",
-                          "Количество (ячейка)", "Сумма (ячейка)", "Сумма учтена, ₽"])
+                          "Количество (ячейка)", "Сумма (ячейка)", "Сумма учтена, ₽", "Диагноз блока"])
     for item in result.items:
         _append(application, [item.row_number, item.original_cells.get("drug_name"), item.mnn,
                               item.original_cells.get("diagnosis"), item.original_cells.get("dosage"),
                               item.original_cells.get("quantity"), item.original_cells.get("amount"),
-                              item.amount])
+                              item.amount, item.diagnosis])
         application.cell(application.max_row, 8).number_format = '#,##0.00'
     _append(checks, ["Строка", "Препарат", "Диагноз", "Категория", "Основание",
-                     "Код причины", "Пояснение", "Ручная проверка", "Фрагмент", "Режим", "Поиск", "Резерв", "Условия из источника"])
+                     "Код причины", "Пояснение", "Ручная проверка", "Фрагмент", "Режим", "Поиск", "Резерв",
+                     "Условия из источника", "Правила", "Фрагмент по выбору GigaChat"])
     _append(sources, ["Строка", "Диагноз", "Фрагмент", "Источник", "Версия", "Раздел",
                       "Цитата", "URL", "Издатель", "Дата получения", "Назначение"])
     for row in result.checks:
         item = items[row.item_id]
-        status = "Источник найден, требуется сверка" if row.relationship_found else STATUS[row.evidence_status]
+        status = _status(row)
         _append(checks, [item.row_number, item.drug_name, names[row.diagnosis_id], row.category,
                          status, row.reason_code, row.explanation,
                          "Да" if row.needs_review else "Нет", row.fragment_id, row.effective_mode,
-                         row.retrieval, row.fallback_reason, "\n".join(row.evidence_conditions)])
+                         row.retrieval, row.fallback_reason, "\n".join(row.evidence_conditions),
+                         ", ".join(row.rule_ids), row.model_highlight.fragment_id if row.model_highlight else None])
         for citation, purpose in (
             [(c, "Подтверждение") for c in row.citations]
             + [(c, "Материал для сверки") for c in row.review_sources]
@@ -98,10 +109,19 @@ def build_xlsx(result: ApplicationResult) -> bytes:
                       "А, %", "Б, %", "В, %", "Не определено, %"])
     for row in result.summary_by_diagnosis:
         labels = ("А", "Б", "В", "undetermined")
-        _append(summary, [names[row.diagnosis_id], COLORS[row.traffic_light], row.reason,
+        _append(summary, [names[row.diagnosis_id], COLORS[row.traffic_light] if result.is_demo else "", row.reason,
                           *(row.amounts[key] for key in labels), *(row.shares[key] for key in labels)])
         for cell in summary[summary.max_row][3:]:
             cell.number_format = '#,##0.00'
+    if result.amounts_total:
+        _append(summary, ["Итого по категориям", "", "",
+                          *(result.amounts_total[key] for key in ("А", "Б", "В", "undetermined"))])
+    if result.recommendation:
+        _append(summary, ["Рекомендация секретарю", result.recommendation])
+    for citation in result.model_summary:
+        _append(summary, ["Фрагмент по выбору GigaChat", citation.title, citation.quote, citation.url])
+    if result.sheet_name:
+        _append(summary, ["Лист XLSX", result.sheet_name])
     _append(summary, ["Известная сумма заявки, ₽", result.known_total])
     summary.cell(summary.max_row, 2).number_format = '#,##0.00'
     _append(summary, ["Справочник", result.reference_version])
@@ -127,8 +147,8 @@ def build_xlsx(result: ApplicationResult) -> bytes:
     for issue in result.issues:
         _append(summary, [f"Замечание, строка {issue.row}" if issue.row else "Замечание",
                           issue.code, issue.message])
-    _format(application, [10, 24, 20, 36, 18, 20, 20, 18])
-    _format(checks, [10, 24, 34, 12, 25, 28, 55, 16, 23, 16, 16, 25, 52])
+    _format(application, [10, 24, 20, 36, 18, 20, 20, 18, 34])
+    _format(checks, [10, 24, 34, 12, 36, 28, 55, 16, 23, 16, 16, 25, 52, 26, 32])
     _format(sources, [10, 34, 22, 35, 22, 25, 58, 40, 20, 18, 23])
     _format(summary, [34, 25, 55, 17, 17, 17, 19, 12, 12, 12, 19])
     output = BytesIO()
@@ -146,7 +166,8 @@ def build_html(result: ApplicationResult) -> str:
         return (f"<li><blockquote>{e(row.quote)}</blockquote>{title} · {e(row.version)} · "
                 f"{e(row.location)} · {e(row.fragment_id)} · получено {e(row.retrieved_at)}</li>")
 
-    names = {diag.diagnosis_id: diag.name for diag in result.diagnoses}
+    names = {diag.diagnosis_id: f"{diag.name} · строка {diag.source_row}" if diag.source_row else diag.name
+             for diag in result.diagnoses}
     items = {item.item_id: item for item in result.items}
     sections = []
     for summary in result.summary_by_diagnosis:
@@ -163,7 +184,11 @@ def build_html(result: ApplicationResult) -> str:
                 review = "".join(cite(c) for c in check.review_sources)
                 source_list += f"<p>Материалы для сверки</p><ul>{review}</ul>"
             fallback = f" · резерв {e(check.fallback_reason)}" if check.fallback_reason else ""
-            status = 'Источник найден, требуется сверка' if check.relationship_found else STATUS[check.evidence_status]
+            status = _status(check)
+            if check.model_highlight:
+                source_list += f"<p>Фрагмент, выделенный GigaChat</p><ul>{cite(check.model_highlight)}</ul>"
+            if check.rule_ids:
+                source_list += f"<p>Правила {e(', '.join(check.rule_ids))}</p>"
             rows.append(f"<tr><td>{item.row_number}</td><td>{e(item.drug_name)}<br>{e(item.mnn)}</td>"
                         f"<td>{e(item.amount)}</td><td>{e(check.category)}</td>"
                         f"<td>{e(status)} · {e(check.reason_code)}<br>"
@@ -178,9 +203,10 @@ def build_html(result: ApplicationResult) -> str:
             found = sum(check.relationship_found for check in result.checks
                         if check.diagnosis_id == summary.diagnosis_id)
             pair_status = f"Документы найдены для {found} из {summary.pair_count} пар."
+        indicator = (f"<p><strong>{e(COLORS[summary.traffic_light])}</strong> — {e(summary.reason)}</p>"
+                     if result.is_demo else "")
         sections.append(
-            f"<section><h2>{e(names[summary.diagnosis_id])}</h2>"
-            f"<p><strong>{e(COLORS[summary.traffic_light])}</strong> — {e(summary.reason)}</p>"
+            f"<section><h2>{e(names[summary.diagnosis_id])}</h2>{indicator}"
             f"<p>{amounts}</p><p>{pair_status}</p>"
             "<table><thead><tr><th>Строка</th><th>Препарат / МНН</th><th>Сумма, ₽</th>"
             "<th>Категория</th><th>Проверка и источники</th></tr></thead>"
@@ -202,6 +228,14 @@ def build_html(result: ApplicationResult) -> str:
             reg_parts.append(f"<details><summary>Строка {item.row_number} · {e(item.drug_name)}</summary>"
                              f"<ul>{citations}</ul></details>")
         official = f"<section><h2>Реестр и состав</h2><p>ГРЛС на {e(result.official_as_of)}</p>{''.join(reg_parts)}</section>"
+    recommendation = ""
+    if result.recommendation:
+        totals = " · ".join(f"{e('На сверке' if label == 'undetermined' else label)} {e(amount)} ₽"
+                            for label, amount in result.amounts_total.items())
+        selected = "".join(cite(row) for row in result.model_summary)
+        highlights = f"<h3>Ключевые основания по выбору GigaChat</h3><ul>{selected}</ul>" if selected else ""
+        recommendation = (f"<section><h2>Рекомендация секретарю</h2><p>{e(result.recommendation)}</p>"
+                          f"<p>{totals}</p>{highlights}</section>")
     return f"""<!doctype html>
 <html lang="ru"><meta charset="utf-8"><title>Отчёт по заявке</title>
 <style>
@@ -211,12 +245,13 @@ th,td{{border:1px solid #d5e0df;padding:9px;text-align:left;vertical-align:top}}
 th{{background:#eaf3f1}}section{{margin:30px 0}}blockquote{{margin:8px 0}}small{{color:#41565e}}
 </style>
 <body><h1>{"Демонстрационный отчёт" if result.is_demo else "Отчёт по официальным источникам"}</h1>
-<p>Файл {e(result.filename)} · заявка {e(result.application_id)}</p>
+<p>Файл {e(result.filename)} · заявка {e(result.application_id)}{f" · лист {e(result.sheet_name)}" if result.sheet_name else ""}</p>
 <p><strong>Известная сумма {known} ₽</strong> · режим {e(result.effective_mode)}
 · справочник {e(result.reference_version)} · корпус {e(result.corpus_version)}</p>
 <p>{e(DEMO_NOTICE if result.is_demo else OFFICIAL_NOTICE)}</p>
 {f'<p>Причина резерва · {e(result.fallback_reason)}</p>' if result.fallback_reason else ''}
 {f'<h2>Замечания к файлу</h2><ul>{issues}</ul>' if issues else ''}
+{recommendation}
 {''.join(sections)}
 {official}
-<footer><p>{e(RECOMMENDATION)}</p><p>{e(result.disclaimer)}</p></footer></body></html>"""
+<footer><p>{e(result.disclaimer)}</p></footer></body></html>"""

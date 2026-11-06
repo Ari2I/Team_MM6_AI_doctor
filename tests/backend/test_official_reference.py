@@ -7,7 +7,7 @@ from openpyxl import Workbook
 import pytest
 
 from app.services.official_reference import (
-    OfficialIndex, OfficialSnapshot, RegistryEntry, EvidenceEntry, CompositionEntry, Source,
+    OfficialIndex, OfficialSnapshot, OfficialRule, RegistryEntry, EvidenceEntry, CompositionEntry, Source, DiagnosisEntry,
     import_grls, load_official,
 )
 
@@ -37,6 +37,74 @@ def make_reference():
         compositions=[CompositionEntry(registration="TEST-1", form="таблетки",
                                        source=SOURCE)],
     )
+
+
+def test_approved_rule_uses_only_explicit_facts():
+    snapshot = make_reference()
+    evidence = snapshot.evidence[0].model_copy(update={"polarity": "supports"})
+    rule = OfficialRule(
+        rule_id="R-1", revision="1", evidence_id=evidence.entry_id, category="B",
+        approval_reference="Синтетическое утверждение для теста", required_purchases=["компонент а"],
+    )
+    index = OfficialIndex(snapshot.model_copy(update={"evidence": (evidence,), "rules": (rule,)}))
+    drug = index.resolve("Независимый тестовый препарат")
+    assert index.lookup(drug, "G43.9", block_mnns=frozenset())["reason_code"] == "OFFICIAL_RULE_CONDITION_MISSING"
+    result = index.lookup(drug, "G43.9", block_mnns=frozenset({"компонент а"}))
+    assert result["category"] == "B"
+    assert result["rule_ids"] == ["R-1@1"]
+    assert result["citations"][0]["url"] == SOURCE.url
+    assert index.lookup(drug, "K25.9", block_mnns=frozenset({"компонент а"})).get("category") is None
+
+def test_unknown_subcode_cannot_inherit_group_rule():
+    base = make_reference()
+    evidence = base.evidence[0].model_copy(update={"code": "G43", "scope": "group", "polarity": "supports"})
+    rule = OfficialRule(rule_id="R-group", revision="1", evidence_id=evidence.entry_id, category="A",
+                        approval_reference="Синтетическое утверждение")
+    diagnosis = DiagnosisEntry(code="G43.9", diagnosis="Тестовый диагноз", source=SOURCE)
+    index = OfficialIndex(base.model_copy(update={
+        "diagnoses": (diagnosis,), "evidence": (evidence,), "rules": (rule,),
+    }))
+    drug = index.resolve("Независимый тестовый препарат")
+    assert index.lookup(drug, "G43.9")["category"] == "A"
+    result = index.lookup(drug, "G43.9999")
+    assert result["reason_code"] == "OFFICIAL_DIAGNOSIS_UNKNOWN"
+    assert result.get("category") is None
+
+
+def test_product_specific_rule_waits_for_unambiguous_registration():
+    base = make_reference()
+    source = base.evidence[0].model_copy(update={
+        "polarity": "supports", "registration": "TEST-1", "kind": "indication",
+    })
+    variant = base.registrations[0].model_copy(update={"registration": "TEST-9", "form": "таблетки 100 мг"})
+    original = base.registrations[0].model_copy(update={"form": "таблетки 50 мг"})
+    rule = OfficialRule(
+        rule_id="R-RU", revision="1", evidence_id=source.entry_id, category="A",
+        approval_reference="Синтетическое утверждение",
+    )
+    index = OfficialIndex(base.model_copy(update={
+        "registrations": (original, variant, *base.registrations[1:]), "evidence": (source,), "rules": (rule,),
+    }))
+    name = original.trade_name
+    result = index.lookup(index.resolve(name), "G43.9")
+    assert result["reason_code"] == "OFFICIAL_REGISTRATION_UNRESOLVED"
+    assert result.get("category") is None
+    assert index.lookup(index.resolve(name, "50 мг"), "G43.9")["category"] == "A"
+    assert index.lookup(index.resolve(name, "100 мг"), "G43.9").get("category") is None
+
+
+def test_unreviewed_pdf_mention_is_cited_without_category():
+    base = make_reference()
+    from app.services.official_reference import OfficialDocument, OfficialPage
+    document = OfficialDocument(code="K25", diagnosis="Другой диагноз", scope="group",
+                                source=SOURCE, state="indexed")
+    page = OfficialPage(url=SOURCE.url, number=5, text="Изучали компонент б и компонент а в отдельной группе.")
+    index = OfficialIndex(base.model_copy(update={"documents": (document,), "pages": (page,)}))
+    result = index.lookup(index.resolve("Независимый тестовый препарат"), "K25.9")
+    assert result["reason_code"] == "OFFICIAL_DOCUMENT_MENTION"
+    assert result["review_sources"][0]["location"] == "Страница PDF 5"
+    assert not result["relationship_found"] and "category" not in result
+
 
 
 def test_grls_workbook_and_inactive_rows(tmp_path):

@@ -104,6 +104,13 @@ def save_and_analyze(
     )
     session.add(application)
     session.flush()
+    if official is not None:
+        application.demo_meta = {
+            "diagnosis_blocks": {str(diag.id): row for row, diag in
+                                 zip(parsed.diagnosis_blocks, application.diagnoses, strict=True)},
+            "item_blocks": {str(row): block for row, block in parsed.item_blocks.items()},
+            "sheet_name": parsed.sheet_name,
+        }
     try:
         with session.begin_nested():
             jobs = {}
@@ -156,7 +163,7 @@ def saved_checks(session: Session, application_id: UUID) -> list[ItemCheck]:
     ))
 
 
-def _summary(diagnosis, checks: list[CheckResult], items: list[ItemResult]) -> DiagnosisSummary:
+def _shares(checks: list[CheckResult], items: list[ItemResult]):
     by_item = {check.item_id: check for check in checks}
     confirmed = {key: row for key, row in by_item.items() if row.evidence_status == "SUPPORTED"}
     latin = {category: key for key, category in CATEGORIES.items()}
@@ -165,13 +172,20 @@ def _summary(diagnosis, checks: list[CheckResult], items: list[ItemResult]) -> D
          if item.item_id in confirmed else None}
         for item in items
     ], exact=True)
+    return shares, confirmed
+
+
+def _summary(diagnosis, checks: list[CheckResult], items: list[ItemResult], *, official=False) -> DiagnosisSummary:
+    shares, confirmed = _shares(checks, items)
     decision = compute_traffic_light(
         shares, False, demo=True,
         incomplete=len(confirmed) != len(items) or any(item.amount is None for item in items),
     )
     categories = CATEGORIES | {"undetermined": "undetermined"}
     return DiagnosisSummary(
-        diagnosis_id=diagnosis.id, traffic_light=decision.color, reason=decision.reason,
+        diagnosis_id=diagnosis.id,
+        traffic_light="undetermined" if official else decision.color,
+        reason="Сводка по диагнозу" if official else decision.reason,
         summary=build_summary(shares, decision.color, True),
         warning=build_warning_message([
             {"needs_review": True, "item_id": row.item_id, "review_reason": row.reason_code}
@@ -192,7 +206,10 @@ def load_result(session: Session, application_id: UUID) -> ApplicationResult | N
     )
     if application is None or not application.demo_meta or application.status != ApplicationStatus.ANALYZED:
         return None
-    diagnoses = sorted(application.diagnoses, key=lambda row: (row.name.casefold(), row.id))
+    blocks = application.demo_meta.get("diagnosis_blocks")
+    diagnoses = sorted(application.diagnoses, key=lambda row: (
+        (blocks[str(row.id)], row.id) if blocks is not None else (row.name.casefold(), row.id)
+    ))
     raw_items = sorted(application.items, key=lambda row: (row.row_number, row.id))
     row_numbers = {item.id: item.row_number for item in raw_items}
     diag_order = {diag.id: index for index, diag in enumerate(diagnoses)}
@@ -214,14 +231,40 @@ def load_result(session: Session, application_id: UUID) -> ApplicationResult | N
     ) for row in raw_items]
     issues = sorted(application.validation_issues, key=lambda row: (row.row or 0, row.code, row.column or ""))
     official = application.demo_meta.get('reference_profile') == 'official'
+    grouped = {}
+    for check in checks:
+        grouped.setdefault(check.diagnosis_id, []).append(check)
+    by_id = {item.item_id: item for item in items}
+    summaries = [
+        _summary(diag, pairs, [by_id[check.item_id] for check in pairs] if blocks is not None else items,
+                 official=official)
+        for diag in diagnoses
+        for pairs in [grouped.get(diag.id, [])]
+    ]
+    aggregate = {}
+    if blocks is not None:
+        labels = ("А", "Б", "В", "undetermined")
+        aggregate = {label: sum((row.amounts[label] for row in summaries), Decimal("0.00")) for label in labels}
+    recommendation = None
+    if blocks is not None:
+        classified = sum(check.category is not None for check in checks)
+        pending = len(checks) - classified
+        recommendation = f"Категория определена для {classified} из {len(checks)} покупок."
+        if pending:
+            recommendation += f" Сверьте {pending} покупок по причинам, указанным в отчёте."
+        if application.demo_meta.get("approved_rule_count") == 0:
+            recommendation += " Утверждённый свод А/Б/В не загружен. Используйте найденные медицинские основания для сверки."
+        elif classified:
+            recommendation += " Используйте указанные медицинские основания и категории при рассмотрении заявки."
     return ApplicationResult(
         application_id=application.id, filename=application.filename, status=application.status,
-        diagnoses=[{"diagnosis_id": row.id, "name": row.name} for row in diagnoses],
+        diagnoses=[{"diagnosis_id": row.id, "name": row.name,
+                    "source_row": blocks[str(row.id)] or None if blocks is not None else None}
+                   for row in diagnoses],
         items=items, checks=checks,
         issues=[{"level": row.level, "code": row.code, "row": row.row, "column": row.column,
                  "message": row.message} for row in issues],
-        summary_by_diagnosis=[_summary(diag, [c for c in checks if c.diagnosis_id == diag.id], items)
-                              for diag in diagnoses],
+        summary_by_diagnosis=summaries, amounts_total=aggregate, recommendation=recommendation,
         known_total=sum((row.amount for row in items if row.amount is not None), Decimal("0")).quantize(CENT),
         requires_review=application.requires_review,
         is_demo=not official,

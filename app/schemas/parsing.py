@@ -37,3 +37,6 @@ class ParseResult(BaseModel):
     column_mapping: dict[str, str] = Field(default_factory=dict)
     missing_columns: list[str] = Field(default_factory=list)
     unknown_columns: list[str] = Field(default_factory=list)
+    sheet_name: str | None = None
+    diagnosis_blocks: dict[int, str] = Field(default_factory=dict)
+    item_blocks: dict[int, int] = Field(default_factory=dict)

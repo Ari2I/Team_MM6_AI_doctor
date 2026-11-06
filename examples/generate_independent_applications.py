@@ -25,7 +25,7 @@ def generate(directory: Path, seed: int, count: int) -> list[Path]:
     paths = []
     for index in range(count):
         diagnoses = rng.sample(DIAGNOSES, 2)
-        drugs = rng.sample(PURCHASES, 3) + [
+        drugs = rng.sample(PURCHASES[:-1], 3) + [
             "Амоксициллин + клавулановая кислота",
             rng.choice(PURCHASES) + "я",
             f"Неизвестная позиция {rng.randrange(1000, 9999)}",
@@ -33,10 +33,11 @@ def generate(directory: Path, seed: int, count: int) -> list[Path]:
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "Синтетические покупки"
-        sheet.append(["Торговое наименование", "Количество", "Сумма", "Диагноз"])
+        sheet.append(["Торговое наименование", "Дозировка", "Количество", "Сумма", "Диагноз (из заключения)"])
         for row, drug in enumerate(drugs):
-            sheet.append([drug, rng.randint(1, 3), rng.randint(85, 1700) if row != 4 else None,
-                          "; ".join(diagnoses) if row == 0 else None])
+            diagnosis = diagnoses[row // 3] if row % 3 == 0 else None
+            sheet.append([drug, None, rng.randint(1, 3), rng.randint(85, 1700) if row != 4 else None,
+                          diagnosis])
         target = directory / f"application-{seed}-{index + 1:02}.xlsx"
         workbook.save(target)
         paths.append(target)

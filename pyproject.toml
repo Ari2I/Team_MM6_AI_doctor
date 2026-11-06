@@ -29,6 +29,7 @@ dependencies = [
 llm-rag = "llm_rag.__main__:main"
 
 [project.optional-dependencies]
+sources = ["pypdf>=5,<7"]
 vector = ["torch>=2.6,<3", "transformers>=4.57,<5", "huggingface-hub>=0.34,<1"]
 dev = [
     "pytest>=8.3,<9",

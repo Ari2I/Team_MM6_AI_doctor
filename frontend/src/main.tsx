@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { Check, Citation, Issue, Light, Mode, Purchase, ReferenceProfile, Result } from './contract'
+import type { Check, Citation, Issue, Light, Mode, Purchase, Result } from './contract'
 import './style.css'
 
 const money = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' })
@@ -10,7 +10,7 @@ const lights: Record<Light, string> = {
   green: 'Зелёный', yellow: 'Жёлтый', red: 'Красный', undetermined: 'Требуется сверка',
 }
 const modes: Record<Mode, string> = {
-  offline: 'Локальный', gigachat: 'GigaChat', mixed: 'GigaChat и локальный резерв',
+  offline: 'По источникам', gigachat: 'GigaChat', mixed: 'GigaChat и результаты по источникам',
 }
 const evidence: Record<Check['evidence_status'], string> = {
   SUPPORTED: 'Подтверждено для демо', INSUFFICIENT_DATA: 'Недостаточно данных',
@@ -23,6 +23,11 @@ const fallbackLabels: Record<string, string> = {
   GIGACHAT_UNVERIFIED_RESPONSE: 'Ответ GigaChat не прошёл проверку цитат.',
   GIGACHAT_PROVIDER_ERROR: 'Сервис GigaChat недоступен.',
   GIGACHAT_TLS_ERROR: 'Не удалось проверить сертификат GigaChat.',
+  GIGACHAT_AUTH_FAILED: 'GigaChat отклонил авторизацию B2B.',
+  GIGACHAT_FORBIDDEN: 'Ключ не даёт доступа к запрошенной модели GigaChat.',
+  GIGACHAT_RATE_LIMIT: 'Достигнут лимит запросов GigaChat.',
+  GIGACHAT_TIMEOUT: 'GigaChat не ответил вовремя.',
+  GIGACHAT_UNAVAILABLE: 'Сервис GigaChat недоступен.',
   NO_CONFIRMED_PAIRS: 'Нет пар с проверенным основанием для вызова GigaChat.',
   PROVIDER_BUSY: 'Сервис проверки занят.',
 }
@@ -43,6 +48,28 @@ function Source({ citation }: { citation: Citation }) {
     <small>{[citation.version, citation.location, citation.fragment_id, citation.publisher,
       citation.retrieved_at && ('получено ' + citation.retrieved_at)].filter(Boolean).join(' · ')}</small>
   </div>
+}
+
+const officialStatuses: Record<string, string> = {
+  OFFICIAL_RULE_APPLIED: 'Правило применено',
+  OFFICIAL_RULE_CONDITION_MISSING: 'Уточните условия правила',
+  OFFICIAL_RULE_CONFLICT: 'Противоречие правил',
+  OFFICIAL_SOURCE_CONFLICT: 'Противоречие источников',
+  OFFICIAL_DIAGNOSIS_MISSING: 'Диагноз не указан',
+  OFFICIAL_DIAGNOSIS_NOT_INDEXED: 'Диагноз вне клинического корпуса',
+  OFFICIAL_DIAGNOSIS_CONFLICT: 'Код расходится с названием',
+  OFFICIAL_DIAGNOSIS_UNRESOLVED: 'Уточните диагноз',
+  OFFICIAL_DIAGNOSIS_UNKNOWN: 'Код отсутствует в МКБ-10',
+  OFFICIAL_DRUG_NOT_FOUND: 'Препарат не найден в реестре',
+  OFFICIAL_DRUG_UNRESOLVED: 'Уточните препарат',
+  OFFICIAL_MNN_NOT_AVAILABLE: 'МНН отсутствует в реестре',
+  OFFICIAL_REGISTRATION_UNRESOLVED: 'Уточните форму препарата и РУ',
+  OFFICIAL_LINK_NOT_FOUND: 'Связь в проверенных фрагментах не найдена',
+  OFFICIAL_DOCUMENT_UNAVAILABLE: 'Документ недоступен',
+  OFFICIAL_DOCUMENT_PENDING: 'Документ ожидает разбора',
+  OFFICIAL_DOCUMENT_MENTION: 'МНН упомянуто в документе',
+  OFFICIAL_LINK_REQUIRES_REVIEW: 'Основание найдено',
+  OFFICIAL_GROUP_LINK_REQUIRES_REVIEW: 'Найден документ для группы диагнозов',
 }
 
 function PurchaseRow({ check, item }: { check: Check; item: Purchase }) {
@@ -66,21 +93,38 @@ function PurchaseRow({ check, item }: { check: Check; item: Purchase }) {
     <td className="money">{item.amount === null ? '—' : money.format(Number(item.amount))}</td>
     <td><span className={check.category ? 'category' : 'muted'}>{check.category || '—'}</span></td>
     <td>
-      <div className="evidence">{check.relationship_found ? 'Источник найден · требуется сверка' : evidence[check.evidence_status]}</div>
+      <div className="evidence">{officialStatuses[check.reason_code] || evidence[check.evidence_status]}</div>
       <p>{check.explanation}</p>
+      {check.evidence_conditions.length > 0 && <ul className="issues">
+        {check.evidence_conditions.map(condition => <li key={condition}>{condition}</li>)}
+      </ul>}
+      {check.rule_ids?.length > 0 && <small>Правила {check.rule_ids.join(', ')}</small>}
+      {check.model_highlight && <details>
+        <summary>Фрагмент, выделенный GigaChat</summary>
+        <Source citation={check.model_highlight}/>
+      </details>}
       {check.citations.length > 0 && <details>
         <summary>Открыть источник</summary>
         {check.citations.map(citation => <Source key={citation.fragment_id + citation.quote} citation={citation}/>)}
       </details>}
       {check.review_sources.length > 0 && <details>
         <summary>Материалы для сверки</summary>
-        {check.evidence_conditions.map(condition => <p key={condition}>{condition}</p>)}
         {check.review_sources.map(citation =>
           <Source key={citation.fragment_id + citation.quote} citation={citation}/>)}
       </details>}
       {check.fallback_reason && <small>Локальный резерв · {fallbackLabels[check.fallback_reason] || check.fallback_reason}</small>}
     </td>
   </tr>
+}
+
+const categoryLabels = { 'А': 'Категория А', 'Б': 'Категория Б', 'В': 'Категория В', undetermined: 'На сверке' }
+type Amounts = Result['amounts_total']
+
+function AmountCards({ amounts }: { amounts: Amounts }) {
+  return <div className="shares">{(Object.keys(categoryLabels) as (keyof Amounts)[]).map(key =>
+    <div key={key}><small>{categoryLabels[key]}</small>
+      <strong>{money.format(Number(amounts[key] ?? 0))}</strong>
+    </div>)}</div>
 }
 
 function ApplicationView({ result }: { result: Result }) {
@@ -98,7 +142,7 @@ function ApplicationView({ result }: { result: Result }) {
       <div>
         <div className="eyebrow">Результат проверки</div>
         <h2>{result.filename}</h2>
-        <small className="application-id">Заявка {result.application_id}</small>
+        <small className="application-id">Заявка {result.application_id}{result.sheet_name && " · Лист " + result.sheet_name}</small>
       </div>
       <div className="actions">
         <a className="button secondary" href={route + '/result.xlsx'}>Скачать Excel</a>
@@ -112,8 +156,15 @@ function ApplicationView({ result }: { result: Result }) {
       <div><small>Фактический режим</small><strong>{modes[result.effective_mode]}</strong><small>Поиск · {methods}</small></div>
     </div>
     <p className="version">{official ? 'Официальный снимок' : 'Справочник'} {result.reference_version}
-      {official && result.official_as_of ? ' · ГРЛС на ' + result.official_as_of : ''}</p>
-    {official && <p className="notice">Категории А/Б/В определяются правилами комиссии. В отчёте показаны найденные документы для сверки.</p>}
+      {official && result.official_as_of ? ' · ГРЛС на ' + result.official_as_of : ''}
+      {result.official_coverage === 'historical' ? ' · исторические данные' : ''}</p>
+    {result.recommendation && <div className="notice">
+      <strong>Рекомендация секретарю</strong><p>{result.recommendation}</p>
+      <AmountCards amounts={result.amounts_total}/>
+      {result.model_summary?.length > 0 && <details><summary>Ключевые основания по выбору GigaChat</summary>
+        {result.model_summary.map((citation, index) => <Source key={index} citation={citation}/>)}
+      </details>}
+    </div>}
     {result.fallback_reason && <div className="notice">Локальный результат сохранён. {fallbackLabels[result.fallback_reason] || result.fallback_reason}</div>}
     {result.issues.length > 0 && <details className="notice" open>
       <summary>Замечания к Excel · {result.issues.length}</summary>
@@ -122,11 +173,12 @@ function ApplicationView({ result }: { result: Result }) {
     <div className="tabs" aria-label="Выбор диагноза">
       {result.diagnoses.map(diag =>
         <button key={diag.diagnosis_id} aria-pressed={selected === diag.diagnosis_id}
-          onClick={() => setSelected(diag.diagnosis_id)}>{diag.name}</button>)}
+          onClick={() => setSelected(diag.diagnosis_id)}>{diag.name}{diag.source_row ? ' · строка ' + diag.source_row : ''}</button>)}
     </div>
     {summary && <div className="diagnosis">
-      <div className="light-line"><span className={'badge ' + summary.traffic_light}>{lights[summary.traffic_light]}</span>
-        <span>{summary.reason}</span></div>
+      {!official && <div className="light-line"><span className={'badge ' + summary.traffic_light}>{lights[summary.traffic_light]}</span>
+        <span>{summary.reason}</span></div>}
+      {official && <AmountCards amounts={summary.amounts}/>}
       {!official && <div className="shares">{(['А', 'Б', 'В', 'undetermined'] as const).map(key =>
         <div key={key}><small>{key === 'undetermined' ? 'Не определено' : 'Категория ' + key}</small>
           <strong>{money.format(Number(summary.amounts[key]))}</strong>
@@ -139,22 +191,33 @@ function ApplicationView({ result }: { result: Result }) {
           )}</tbody></table>
       </div>
     </div>}
-    <footer><strong>Все пары передаются на ручную проверку.</strong> {result.disclaimer}.</footer>
+    <footer>{result.disclaimer}.</footer>
   </section>
+}
+
+type Layout = {
+  sheets: { name: string; header_row: number; headers: string[] }[]
+  columns: Record<string, { index: number; header: string; sample: string[] }[]>
+  sheet: string | null
+}
+
+class LayoutRequired extends Error {
+  constructor(readonly layout: Layout) { super('Уточните таблицу заявки') }
 }
 
 async function readResponse(response: Response): Promise<Result> {
   const json = await response.json()
   if (response.ok) return json as Result
+  if (response.status === 409 && json.detail?.layout) throw new LayoutRequired(json.detail.layout)
   const issues = json.detail?.issues
   throw Array.isArray(issues) ? issues : new Error('Не удалось выполнить запрос.')
 }
 
 function App() {
   const [file, setFile] = useState<File | null>(null)
-  const [reference, setReference] = useState<ReferenceProfile | null>(null)
-  const [officialAvailable, setOfficialAvailable] = useState(false)
-  const [mode, setMode] = useState<'offline' | 'gigachat'>('offline')
+  const [layout, setLayout] = useState<Layout | null>(null)
+  const [sheet, setSheet] = useState('')
+  const [columns, setColumns] = useState<Record<string, number>>({})
   const [result, setResult] = useState<Result | null>(null)
   const [issues, setIssues] = useState<Issue[]>([])
   const [busy, setBusy] = useState(false)
@@ -174,10 +237,15 @@ function App() {
         : { signal: controller.signal }))
       if (controller.signal.aborted) return
       setResult(data)
+      setLayout(null)
       history.replaceState(null, '', '?application=' + encodeURIComponent(data.application_id))
     } catch (error) {
       if (controller.signal.aborted) return
-      if (Array.isArray(error)) setIssues(error)
+      if (error instanceof LayoutRequired) {
+        setLayout(error.layout)
+        setSheet(error.layout.sheet ?? '')
+        setColumns({})
+      } else if (Array.isArray(error)) setIssues(error)
       else setMessage('Не удалось получить результат. Проверьте соединение с сервером.')
     } finally {
       if (!controller.signal.aborted) setBusy(false)
@@ -185,22 +253,17 @@ function App() {
   }
 
   useEffect(() => {
-    const controller = new AbortController()
-    void fetch('/api/references', { signal: controller.signal })
-      .then(response => response.json())
-      .then(data => {
-        setOfficialAvailable(Boolean(data.official))
-        setReference(data.default === 'official' ? 'official' : 'demo')
-      })
-      .catch(() => { if (!controller.signal.aborted) setReference('demo') })
     const saved = new URLSearchParams(location.search).get('application')
     if (saved) void request('/api/applications/' + encodeURIComponent(saved))
-    return () => { controller.abort(); current.current?.abort() }
+    return () => current.current?.abort()
   }, [])
 
   function choose(value: File | null) {
     current.current?.abort()
     setFile(value)
+    setLayout(null)
+    setSheet('')
+    setColumns({})
     setResult(null)
     setIssues([])
     setMessage('')
@@ -210,11 +273,12 @@ function App() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!file || !reference) return
+    if (!file) return
     const form = new FormData()
     form.set('file', file)
-    form.set('reference', reference)
-    form.set('mode', reference === 'official' ? 'offline' : mode)
+    form.set('reference', 'official')
+    if (sheet) form.set('sheet', sheet)
+    if (Object.keys(columns).length) form.set('columns', JSON.stringify(columns))
     setResult(null)
     void request('/api/applications', form)
   }
@@ -226,25 +290,35 @@ function App() {
     <main>
       <section className="intro"><div className="eyebrow">Материальная помощь</div>
         <h1>Проверка расходов по диагнозам</h1>
-        <p>Загрузите список покупок из Excel. Система проверит каждую покупку по каждому диагнозу и покажет источники и позиции для ручной сверки.</p>
+        <p>Загрузите Excel с торговыми наименованиями, дозировками, количеством, суммами и диагнозами из заключения. Строка с диагнозом начинает новый блок покупок.</p>
       </section>
       <form className="upload" onSubmit={submit}>
-        <div className="upload-title"><h2>Загрузить заявку</h2><a href="/api/demo.xlsx">Скачать демо Excel ↓</a></div>
+        <div className="upload-title"><h2>Загрузить заявку</h2></div>
         <div className="upload-fields">
           <label className="file-label">Файл заявки (.xlsx)
             <input type="file" accept=".xlsx" required onChange={event => choose(event.target.files?.[0] ?? null)}/>
           </label>
-          <label>Справочник<select value={reference || ''} disabled={!reference} onChange={event => setReference(event.target.value === 'official' ? 'official' : 'demo')}>
-            {!reference && <option value="">Загрузка…</option>}
-            <option value="official" disabled={!officialAvailable}>Официальные источники</option>
-            <option value="demo">Демонстрационный</option>
-          </select></label>
-          {reference === 'demo' && <label>Режим пояснений<select value={mode} onChange={event => setMode(event.target.value === 'gigachat' ? 'gigachat' : 'offline')}>
-            <option value="offline">Локальный</option><option value="gigachat">GigaChat · только демо-файл</option>
-          </select></label>}
-          <button className="button primary" type="submit" disabled={!file || !reference || busy}>{busy ? 'Обработка…' : 'Проверить заявку'}</button>
+          {layout?.sheets.length ? <label>Лист с покупками
+            <select required value={sheet} onChange={event => setSheet(event.target.value)}>
+              <option value="">Выберите лист</option>
+              {layout.sheets.map(row => <option key={row.name} value={row.name}>
+                {row.name} · строка {row.header_row} · {row.headers.filter(Boolean).join(' / ')}
+              </option>)}
+            </select>
+          </label> : null}
+          {layout && Object.entries(layout.columns).map(([field, options]) => <label key={field}>
+            Уточните столбец «{options[0].header}»
+            <select required value={columns[field] ?? ''} onChange={event =>
+              setColumns({ ...columns, [field]: Number(event.target.value) })}>
+              <option value="">Выберите столбец</option>
+              {options.map(option => <option key={option.index} value={option.index}>
+                Столбец {option.index + 1} · {option.header} · {option.sample.filter(Boolean).join(' / ')}
+              </option>)}
+            </select>
+          </label>)}
+          <button className="button primary" type="submit" disabled={!file || busy}>{busy ? 'Обработка…' : 'Проверить заявку'}</button>
         </div>
-        {reference === 'demo' && mode === 'gigachat' && <p className="hint">Для вызова GigaChat используется исходный синтетический файл из ссылки выше.</p>}
+        {layout && <p className="hint">В книге несколько подходящих вариантов. Выберите данные заявки.</p>}
       </form>
       {busy && <p role="status" className="notice">Проверка выполняется…</p>}
       {(issues.length > 0 || message) && <div role="alert" className="notice error">
