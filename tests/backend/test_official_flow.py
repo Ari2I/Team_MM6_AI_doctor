@@ -44,7 +44,24 @@ def test_official_http_result_is_saved_and_exported(client, monkeypatch, tmp_pat
     }
     base = f'/api/applications/{result["application_id"]}'
     assert client.get(base).json() == result
-    assert "Состав и реестр" in load_workbook(BytesIO(client.get(base + "/result.xlsx").content)).sheetnames
+    report = load_workbook(BytesIO(client.get(base + "/result.xlsx").content))
+    assert report.sheetnames == ["Проверка", "Сводка", "Источники", "Заявка", "Состав и реестр"]
+    checks = report.active
+    assert checks.title == "Проверка"
+    assert checks["B4"].value == 1000
+    assert checks["F4"].value == 1000
+    assert result["recommendation"] in checks["A6"].value
+    rows = {row[0].value: row for row in checks.iter_rows() if isinstance(row[0].value, int)}
+    assert len(rows) == 3
+    assert rows[2][2].value == result["items"][0]["mnn"]
+    assert rows[2][4].value == 900
+    assert rows[2][5].value == "На сверке"
+    assert result["checks"][0]["explanation"] in rows[2][6].value
+    assert "Материал для сверки" in rows[2][8].value
+    assert rows[2][8].hyperlink.target == result["checks"][0]["review_sources"][0]["url"]
+    assert rows[3][8].value is None
+    assert rows[2][3].value == rows[3][3].value != rows[4][3].value
+    assert report["Заявка"]["B2"].value == "Независимый тестовый препарат"
     assert "Реестр и состав" in client.get(base + "/report.html").text
     with applications.sessions().begin() as session:
         application_id = UUID(result['application_id'])

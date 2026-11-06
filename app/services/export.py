@@ -2,6 +2,7 @@
 
 from html import escape
 from io import BytesIO
+from textwrap import wrap
 from urllib.parse import urlsplit
 
 from openpyxl import Workbook
@@ -25,6 +26,8 @@ RECOMMENDATION = (
 )
 DEMO_NOTICE = "Категории А/Б/В и пороги индикатора — демонстрационные правила. Решение о выплате принимает комиссия."
 OFFICIAL_NOTICE = "Официальные источники приведены для сверки. Категории определяются правилами комиссии."
+MONEY_FORMAT = "#,##0.00"
+CHECK_WIDTHS = [9, 24, 22, 29, 14, 13, 49, 34, 31, 15]
 
 
 def safe_https(url: str | None) -> str | None:
@@ -43,15 +46,16 @@ def _append(sheet, values):
             cell.data_type = "s"
 
 
-def _format(sheet, widths):
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = sheet.dimensions
+def _format(sheet, widths, header_row=1):
+    sheet.freeze_panes = f"A{header_row + 1}"
+    sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(sheet.max_column)}{sheet.max_row}"
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
-    for cell in sheet[1]:
+    for cell in sheet[header_row]:
         cell.fill = PatternFill("solid", fgColor="174D4C")
         cell.font = Font(color="FFFFFF", bold=True)
-    for row in sheet.iter_rows(min_row=2):
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    for row in sheet.iter_rows(min_row=header_row + 1):
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
 
@@ -64,13 +68,87 @@ def _status(row):
     return STATUS[row.evidence_status]
 
 
+def _set_link(cell, url):
+    if target := safe_https(url):
+        cell.hyperlink = target
+        cell.font = Font(color="176B82", underline="single")
+
+
+def _report_line(sheet, text, *, title=False):
+    _append(sheet, [text])
+    row = sheet.max_row
+    sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(CHECK_WIDTHS))
+    cell = sheet.cell(row, 1)
+    cell.alignment = Alignment(vertical="center", wrap_text=True)
+    if title:
+        cell.fill = PatternFill("solid", fgColor="174D4C")
+        cell.font = Font(color="FFFFFF", bold=True, size=16)
+    lines = sum(max(1, len(wrap(line, width=150))) for line in text.split("\n"))
+    sheet.row_dimensions[row].height = max(29 if title else 21, 15 * lines + 6)
+
+
+def _official_report_header(sheet, result):
+    _report_line(sheet, "Отчёт по проверке расходов", title=True)
+    _report_line(sheet, f"Файл заявки · {result.filename}")
+    _append(sheet, [None, "Известная сумма, ₽", "Категория А, ₽", "Категория Б, ₽",
+                    "Категория В, ₽", "На сверке, ₽"])
+    _append(sheet, [None, result.known_total, *(result.amounts_total.get(key)
+                                             for key in ("А", "Б", "В", "undetermined"))])
+    for label, amount in zip(sheet[3][1:6], sheet[4][1:6]):
+        label.fill = PatternFill("solid", fgColor="EAF3F1")
+        label.font = Font(color="174D4C", bold=True)
+        label.alignment = Alignment(vertical="center", wrap_text=True)
+        amount.font = Font(bold=True, size=13)
+        amount.number_format = MONEY_FORMAT
+    sheet.row_dimensions[3].height = 31
+    found = sum(row.relationship_found for row in result.checks)
+    _report_line(sheet, f"Проверок · {len(result.checks)}    "
+                        f"Связей в справочнике · {found}    "
+                        f"Замечаний к файлу · {len(result.issues)} (лист «Сводка»)\n"
+                        "Полный список документов и выдержки приведены на листе «Источники».")
+    _report_line(sheet, f"Рекомендация секретарю. {result.recommendation or OFFICIAL_NOTICE}")
+    if result.model_review_priorities:
+        _report_line(sheet, "Что сверить в первую очередь по выбору GigaChat\n"
+                            + "\n".join(result.model_review_priorities))
+    _append(sheet, ["Строка", "Препарат", "МНН", "Диагноз блока", "Сумма, ₽", "Категория", "Основание",
+                    "Шаг сверки GigaChat", "Документ и его роль", "Копия",
+                    "Код причины", "Ручная проверка", "Фрагмент", "Режим", "Поиск", "Резерв",
+                    "Условия из источника", "Правила", "Фрагмент по выбору GigaChat"])
+    sheet.row_dimensions[sheet.max_row].height = 30
+    return sheet.max_row
+
+
+def _official_report_check(sheet, row, item, diagnosis, status, references, details):
+    citation, purpose = references[0] if references else (None, None)
+    document = f"{purpose}\n{citation.title} · {citation.version}" if citation else None
+    explanation = row.explanation if status == row.explanation else f"{status}\n{row.explanation}"
+    copy_url = safe_https(citation.copy_url) if citation else None
+    amount = item.amount if item.amount is not None else "Не учтена"
+    _append(sheet, [item.row_number, item.drug_name, item.mnn, diagnosis, amount,
+                    row.category or "На сверке", explanation, row.model_review_action, document,
+                    "Открыть копию" if copy_url else None, *details])
+    number = sheet.max_row
+    sheet.cell(number, 5).number_format = MONEY_FORMAT
+    if citation:
+        _set_link(sheet.cell(number, 9), citation.url)
+        _set_link(sheet.cell(number, 10), copy_url)
+    visible = sheet[number][:len(CHECK_WIDTHS)]
+    lines = max(sum(max(1, len(wrap(line, width=width - 2))) for line in str(cell.value or "").split("\n"))
+                for cell, width in zip(visible, CHECK_WIDTHS))
+    sheet.row_dimensions[number].height = min(409, max(28, 15 * lines + 6))
+
+
 def build_xlsx(result: ApplicationResult) -> bytes:
     workbook = Workbook()
+    official = result.reference_profile == "official"
     application = workbook.active
     application.title = "Заявка"
-    checks = workbook.create_sheet("Проверка")
+    checks = workbook.create_sheet("Проверка", 0 if official else None)
     sources = workbook.create_sheet("Источники")
-    summary = workbook.create_sheet("Сводка")
+    summary = workbook.create_sheet("Сводка", 1 if official else None)
+    if official:
+        workbook.active = checks
+        workbook.move_sheet(application, offset=1)
     names = {diag.diagnosis_id: f"{diag.name} · строка {diag.source_row}" if diag.source_row else diag.name
              for diag in result.diagnoses}
     items = {item.item_id: item for item in result.items}
@@ -82,34 +160,37 @@ def build_xlsx(result: ApplicationResult) -> bytes:
                               item.original_cells.get("quantity"), item.original_cells.get("amount"),
                               item.amount, item.diagnosis])
         application.cell(application.max_row, 8).number_format = '#,##0.00'
-    _append(checks, ["Строка", "Препарат", "Диагноз", "Категория", "Основание",
-                     "Код причины", "Пояснение", "Ручная проверка", "Фрагмент", "Режим", "Поиск", "Резерв",
-                     "Условия из источника", "Правила", "Фрагмент по выбору GigaChat", "Шаг сверки по выбору GigaChat"])
+    if official:
+        header_row = _official_report_header(checks, result)
+    else:
+        _append(checks, ["Строка", "Препарат", "Диагноз", "Категория", "Основание",
+                         "Код причины", "Пояснение", "Ручная проверка", "Фрагмент", "Режим", "Поиск", "Резерв",
+                         "Условия из источника", "Правила", "Фрагмент по выбору GigaChat", "Шаг сверки по выбору GigaChat"])
     _append(sources, ["Строка", "Диагноз", "Фрагмент", "Источник", "Версия", "Раздел",
                       "Цитата", "URL оригинала", "Издатель", "Дата получения", "Назначение", "URL опубликованной копии"])
     for row in result.checks:
         item = items[row.item_id]
         status = _status(row)
-        _append(checks, [item.row_number, item.drug_name, names[row.diagnosis_id], row.category,
-                         status, row.reason_code, row.explanation,
-                         "Да" if row.needs_review else "Нет", row.fragment_id, row.effective_mode,
-                         row.retrieval, row.fallback_reason, "\n".join(row.evidence_conditions),
-                         ", ".join(row.rule_ids), row.model_highlight.fragment_id if row.model_highlight else None,
-                         row.model_review_action])
-        for citation, purpose in (
-            [(c, "Подтверждение") for c in row.citations]
-            + [(c, "Материал для сверки") for c in row.review_sources]
-            + [(c, "Карточка каталога без доступного текста") for c in row.catalog_sources]
-            + [(c, "Документ, по которому выполнен поиск") for c in row.searched_sources]
-        ):
+        details = ["Да" if row.needs_review else "Нет", row.fragment_id, row.effective_mode,
+                   row.retrieval, row.fallback_reason, "\n".join(row.evidence_conditions),
+                   ", ".join(row.rule_ids), row.model_highlight.fragment_id if row.model_highlight else None]
+        references = ([(c, "Подтверждение") for c in row.citations]
+                      + [(c, "Материал для сверки") for c in row.review_sources]
+                      + [(c, "Документ, по которому выполнен поиск") for c in row.searched_sources]
+                      + [(c, "Карточка каталога без доступного текста") for c in row.catalog_sources])
+        diagnosis = names[row.diagnosis_id]
+        if official:
+            _official_report_check(checks, row, item, diagnosis, status, references, [row.reason_code, *details])
+        else:
+            _append(checks, [item.row_number, item.drug_name, diagnosis, row.category,
+                             status, row.reason_code, row.explanation, *details, row.model_review_action])
+        for citation, purpose in references:
             _append(sources, [item.row_number, names[row.diagnosis_id], citation.fragment_id,
                               citation.title, citation.version, citation.location, citation.quote,
                               safe_https(citation.url), citation.publisher, citation.retrieved_at, purpose,
                               safe_https(citation.copy_url)])
-            if safe_https(citation.url):
-                sources.cell(sources.max_row, 8).hyperlink = citation.url
-            if safe_https(citation.copy_url):
-                sources.cell(sources.max_row, 12).hyperlink = citation.copy_url
+            _set_link(sources.cell(sources.max_row, 8), citation.url)
+            _set_link(sources.cell(sources.max_row, 12), citation.copy_url)
     _append(summary, ["Диагноз / показатель", "Индикатор / значение", "Причина",
                       "А, ₽", "Б, ₽", "В, ₽", "Не определено, ₽",
                       "А, %", "Б, %", "В, %", "Не определено, %"])
@@ -137,7 +218,7 @@ def build_xlsx(result: ApplicationResult) -> bytes:
     _append(summary, ["Справочник", result.reference_version])
     _append(summary, ["Корпус", result.corpus_version])
     _append(summary, ["Режим", result.effective_mode, result.fallback_reason])
-    if result.reference_profile == "official":
+    if official:
         _append(summary, ["ГРЛС на дату", result.official_as_of])
         registry = workbook.create_sheet("Состав и реестр")
         _append(registry, ["Строка", "Тип записи", "РУ", "Форма", "Выдержка", "Источник", "URL"])
@@ -158,7 +239,12 @@ def build_xlsx(result: ApplicationResult) -> bytes:
         _append(summary, [f"Замечание, строка {issue.row}" if issue.row else "Замечание",
                           issue.code, issue.message])
     _format(application, [10, 24, 20, 36, 18, 20, 20, 18, 34])
-    _format(checks, [10, 24, 34, 12, 36, 28, 55, 16, 23, 16, 16, 25, 52, 26, 32, 45])
+    if official:
+        _format(checks, [*CHECK_WIDTHS, 30, 16, 23, 16, 16, 25, 52, 26, 32], header_row)
+        checks.column_dimensions.group("K", "S", hidden=True)
+        checks.sheet_view.zoomScale = 85
+    else:
+        _format(checks, [10, 24, 34, 12, 36, 28, 55, 16, 23, 16, 16, 25, 52, 26, 32, 45])
     _format(sources, [10, 34, 22, 35, 22, 25, 58, 40, 20, 18, 29, 42])
     _format(summary, [34, 25, 55, 17, 17, 17, 19, 12, 12, 12, 19])
     output = BytesIO()
