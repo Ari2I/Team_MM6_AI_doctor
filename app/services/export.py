@@ -84,7 +84,7 @@ def build_xlsx(result: ApplicationResult) -> bytes:
         application.cell(application.max_row, 8).number_format = '#,##0.00'
     _append(checks, ["Строка", "Препарат", "Диагноз", "Категория", "Основание",
                      "Код причины", "Пояснение", "Ручная проверка", "Фрагмент", "Режим", "Поиск", "Резерв",
-                     "Условия из источника", "Правила", "Фрагмент по выбору GigaChat"])
+                     "Условия из источника", "Правила", "Фрагмент по выбору GigaChat", "Шаг сверки по выбору GigaChat"])
     _append(sources, ["Строка", "Диагноз", "Фрагмент", "Источник", "Версия", "Раздел",
                       "Цитата", "URL", "Издатель", "Дата получения", "Назначение"])
     for row in result.checks:
@@ -94,10 +94,12 @@ def build_xlsx(result: ApplicationResult) -> bytes:
                          status, row.reason_code, row.explanation,
                          "Да" if row.needs_review else "Нет", row.fragment_id, row.effective_mode,
                          row.retrieval, row.fallback_reason, "\n".join(row.evidence_conditions),
-                         ", ".join(row.rule_ids), row.model_highlight.fragment_id if row.model_highlight else None])
+                         ", ".join(row.rule_ids), row.model_highlight.fragment_id if row.model_highlight else None,
+                         row.model_review_action])
         for citation, purpose in (
             [(c, "Подтверждение") for c in row.citations]
             + [(c, "Материал для сверки") for c in row.review_sources]
+            + [(c, "Карточка каталога без доступного текста") for c in row.catalog_sources]
         ):
             _append(sources, [item.row_number, names[row.diagnosis_id], citation.fragment_id,
                               citation.title, citation.version, citation.location, citation.quote,
@@ -118,6 +120,10 @@ def build_xlsx(result: ApplicationResult) -> bytes:
                           *(result.amounts_total[key] for key in ("А", "Б", "В", "undetermined"))])
     if result.recommendation:
         _append(summary, ["Рекомендация секретарю", result.recommendation])
+    for action in result.model_review_priorities:
+        _append(summary, ["Приоритет сверки по выбору GigaChat", action])
+    if result.model_tokens is not None:
+        _append(summary, ["Токены GigaChat", result.model_tokens])
     for citation in result.model_summary:
         _append(summary, ["Фрагмент по выбору GigaChat", citation.title, citation.quote, citation.url])
     if result.sheet_name:
@@ -148,7 +154,7 @@ def build_xlsx(result: ApplicationResult) -> bytes:
         _append(summary, [f"Замечание, строка {issue.row}" if issue.row else "Замечание",
                           issue.code, issue.message])
     _format(application, [10, 24, 20, 36, 18, 20, 20, 18, 34])
-    _format(checks, [10, 24, 34, 12, 36, 28, 55, 16, 23, 16, 16, 25, 52, 26, 32])
+    _format(checks, [10, 24, 34, 12, 36, 28, 55, 16, 23, 16, 16, 25, 52, 26, 32, 45])
     _format(sources, [10, 34, 22, 35, 22, 25, 58, 40, 20, 18, 23])
     _format(summary, [34, 25, 55, 17, 17, 17, 19, 12, 12, 12, 19])
     output = BytesIO()
@@ -180,6 +186,9 @@ def build_html(result: ApplicationResult) -> str:
             source_list = f"<ul>{citations}</ul>" if citations else ""
             if check.evidence_conditions:
                 source_list += "<p>" + "<br>".join(e(x) for x in check.evidence_conditions) + "</p>"
+            if check.catalog_sources:
+                catalog = "".join(cite(c) for c in check.catalog_sources)
+                source_list += f"<p>Рекомендации в каталоге без доступного текста</p><ul>{catalog}</ul>"
             if check.review_sources:
                 review = "".join(cite(c) for c in check.review_sources)
                 source_list += f"<p>Материалы для сверки</p><ul>{review}</ul>"
@@ -187,6 +196,8 @@ def build_html(result: ApplicationResult) -> str:
             status = _status(check)
             if check.model_highlight:
                 source_list += f"<p>Фрагмент, выделенный GigaChat</p><ul>{cite(check.model_highlight)}</ul>"
+            if check.model_review_action:
+                source_list += f"<p>Шаг сверки по выбору GigaChat. {e(check.model_review_action)}</p>"
             if check.rule_ids:
                 source_list += f"<p>Правила {e(', '.join(check.rule_ids))}</p>"
             rows.append(f"<tr><td>{item.row_number}</td><td>{e(item.drug_name)}<br>{e(item.mnn)}</td>"
@@ -236,6 +247,10 @@ def build_html(result: ApplicationResult) -> str:
         highlights = f"<h3>Ключевые основания по выбору GigaChat</h3><ul>{selected}</ul>" if selected else ""
         recommendation = (f"<section><h2>Рекомендация секретарю</h2><p>{e(result.recommendation)}</p>"
                           f"<p>{totals}</p>{highlights}</section>")
+    priorities = "".join(f"<li>{e(action)}</li>" for action in result.model_review_priorities)
+    if priorities:
+        recommendation += f"<section><h2>Что сверить в первую очередь</h2><ul>{priorities}</ul></section>"
+    token_status = f"<p>Токены GigaChat · {e(result.model_tokens)}</p>" if result.model_tokens is not None else ""
     return f"""<!doctype html>
 <html lang="ru"><meta charset="utf-8"><title>Отчёт по заявке</title>
 <style>
@@ -251,6 +266,7 @@ th{{background:#eaf3f1}}section{{margin:30px 0}}blockquote{{margin:8px 0}}small{
 <p>{e(DEMO_NOTICE if result.is_demo else OFFICIAL_NOTICE)}</p>
 {f'<p>Причина резерва · {e(result.fallback_reason)}</p>' if result.fallback_reason else ''}
 {f'<h2>Замечания к файлу</h2><ul>{issues}</ul>' if issues else ''}
+{token_status}
 {recommendation}
 {''.join(sections)}
 {official}

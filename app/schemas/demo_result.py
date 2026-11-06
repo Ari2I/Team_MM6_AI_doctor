@@ -77,9 +77,11 @@ class CheckResult(BaseModel):
     evidence_reasons: list[str] = Field(default_factory=list)
     citations: list[SourceCitation] = Field(default_factory=list)
     review_sources: list[SourceCitation] = Field(default_factory=list)
+    catalog_sources: list[SourceCitation] = Field(default_factory=list)
     evidence_conditions: list[str] = Field(default_factory=list)
     rule_ids: list[str] = Field(default_factory=list)
     model_highlight: SourceCitation | None = None
+    model_review_action: str | None = None
     relationship_found: bool = False
     effective_mode: Mode
     retrieval: Literal["lexical", "vector"]
@@ -113,7 +115,9 @@ class ApplicationResult(BaseModel):
     amounts_total: dict[str, Decimal] = Field(default_factory=dict)
     recommendation: str | None = None
     model_summary: list[SourceCitation] = Field(default_factory=list)
+    model_review_priorities: list[str] = Field(default_factory=list)
     model_attempted: bool = False
+    model_tokens: int | None = None
     approved_rule_count: int | None = None
     reference_version: str
     corpus_version: str

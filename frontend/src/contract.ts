@@ -30,10 +30,12 @@ export type Check = {
   reason_code: string
   citations: Citation[]
   review_sources: Citation[]
+  catalog_sources: Citation[]
   relationship_found: boolean
   evidence_conditions: string[]
   rule_ids: string[]
   model_highlight: Citation | null
+  model_review_action: string | null
   effective_mode: Mode
   retrieval: 'lexical' | 'vector'
   fallback_reason: string | null
@@ -78,7 +80,9 @@ export type Result = {
   amounts_total: Partial<Record<Category | 'undetermined', string>>
   recommendation: string | null
   model_summary: Citation[]
+  model_review_priorities: string[]
   model_attempted: boolean
+  model_tokens: number | null
   reference_version: string
   corpus_version: string
   effective_mode: Mode

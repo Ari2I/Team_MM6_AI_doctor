@@ -66,12 +66,31 @@ def active_documents(records: list[dict]):
             yield row
 
 
+def _fetch_pdf(client: httpx.Client, key: str) -> bytes:
+    with client.stream("GET", f"{PDF_URL}&id={key}") as response:
+        response.raise_for_status()
+        content = bytearray()
+        for chunk in response.iter_bytes():
+            content.extend(chunk)
+            if len(content) > _MAX_PDF:
+                raise ValueError("Размер PDF превышает предел.")
+    if not content.startswith(b"%PDF-"):
+        raise ValueError("Полученный файл не является PDF.")
+    return bytes(content)
+
+
+def _temporary_error(error: Exception) -> bool:
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code == 429 or error.response.status_code >= 500
+    return isinstance(error, httpx.TransportError)
+
+
 def _fetch_pdfs(client: httpx.Client, records: list[dict], cache: Path, limit: int | None) -> None:
     target = cache / "pdf"
     target.mkdir(exist_ok=True)
     failures_path = cache / "unavailable.json"
     failures = set(_read(failures_path)) if failures_path.exists() else set()
-    attempts = 0
+    attempts = downloaded = consecutive_errors = 0
     for row in active_documents(records):
         key = row["CodeVersion"]
         file = target / f"{key}.pdf"
@@ -82,21 +101,29 @@ def _fetch_pdfs(client: httpx.Client, records: list[dict], cache: Path, limit: i
             break
         attempts += 1
         try:
-            with client.stream("GET", f"{PDF_URL}&id={key}") as response:
-                response.raise_for_status()
-                chunks = bytearray()
-                for chunk in response.iter_bytes():
-                    chunks.extend(chunk)
-                    if len(chunks) > _MAX_PDF:
-                        raise ValueError("Размер PDF превышает предел.")
-            if not chunks.startswith(b"%PDF-"):
-                raise ValueError("Полученный файл не является PDF.")
-            _write(file, chunks)
+            try:
+                content = _fetch_pdf(client, key)
+            except httpx.HTTPError as error:
+                if not _temporary_error(error):
+                    raise
+                sleep(1)
+                content = _fetch_pdf(client, key)
+            _write(file, content)
+            downloaded += 1
             failures.discard(key)
-        except (httpx.HTTPError, ValueError):
+            consecutive_errors = 0
+        except (httpx.HTTPError, ValueError) as error:
             failures.add(key)
+            consecutive_errors = consecutive_errors + 1 if _temporary_error(error) else 0
+            if consecutive_errors >= 3:
+                _json(failures_path, sorted(failures))
+                raise ValueError("Рубрикатор трижды не выдал PDF после повторных попыток. "
+                                 "Ранее скачанные файлы сохранены.") from error
+        if attempts % 25 == 0:
+            print(f"PDF: получено {downloaded} из {attempts} запрошенных.", flush=True)
         sleep(0.2)
     _json(failures_path, sorted(failures))
+    print(f"PDF: получено {downloaded} из {attempts} запрошенных, не получено {len(failures)}.")
 
 
 def read_rubricator(cache: Path, as_of: date):
@@ -136,7 +163,7 @@ def read_rubricator(cache: Path, as_of: date):
         if path.is_file():
             extracted = _extract_pages(path, url)
             pages.extend(extracted)
-            state = "indexed" if extracted else "pending"
+            state = "indexed" if extracted else "no_text"
         version = f"{key} · {row['PublishDateStr'][:10]}" if row.get("PublishDateStr") else key
         source = Source(title=row["Name"], url=url, version=version, location="Рубрикатор Минздрава",
                         retrieved_at=as_of, quote=row["Name"])
@@ -184,7 +211,10 @@ def main():
             _json(args.cache / "mkb.json", mkb)
             _json(args.cache / "catalog.json", records)
         if args.download_pdfs:
-            _fetch_pdfs(client, records, args.cache, args.pdf_limit)
+            try:
+                _fetch_pdfs(client, records, args.cache, args.pdf_limit)
+            except ValueError as error:
+                parser.exit(1, f"{error}\n")
     print(f"Каталог: {len(records)} опубликованных записей, {sum(1 for _ in active_documents(records))} применяются.")
 
 

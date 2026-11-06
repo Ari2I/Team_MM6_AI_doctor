@@ -2,6 +2,9 @@
 
 from datetime import date
 from pathlib import Path
+import json
+
+import httpx
 
 from openpyxl import Workbook
 import pytest
@@ -160,6 +163,47 @@ def test_code_and_known_diagnosis_name_must_agree():
     assert index.lookup(drug, "G43.9 Мигрень")["reason_code"] == "OFFICIAL_GROUP_LINK_REQUIRES_REVIEW"
     assert index.lookup(drug, "G43.9 Язва желудка")["reason_code"] == "OFFICIAL_DIAGNOSIS_CONFLICT"
     assert index.lookup(drug, "G43.AAAA")["reason_code"] == "OFFICIAL_DIAGNOSIS_NOT_INDEXED"
+
+
+@pytest.mark.parametrize(("state", "reason"), [
+    ("pending", "OFFICIAL_DOCUMENT_PENDING"),
+    ("unavailable", "OFFICIAL_DOCUMENT_UNAVAILABLE"),
+    ("no_text", "OFFICIAL_DOCUMENT_NO_TEXT"),
+])
+def test_catalog_card_is_not_a_clinical_citation(state, reason):
+    from app.services.official_reference import OfficialDocument
+
+    base = make_reference()
+    document = OfficialDocument(code="K25", diagnosis="Другой диагноз", scope="group",
+                                source=SOURCE, state=state)
+    index = OfficialIndex(base.model_copy(update={"documents": (document,)}))
+    result = index.lookup(index.resolve("Независимый тестовый препарат"), "K25.9")
+    assert result["reason_code"] == reason
+    assert result["catalog_sources"][0]["url"] == SOURCE.url
+    assert not result["review_sources"] and not result["relationship_found"]
+
+
+def test_rubricator_retries_outage_and_keeps_downloads(tmp_path, monkeypatch):
+    from app.services import official_catalog
+
+    monkeypatch.setattr(official_catalog, "sleep", lambda _seconds: None)
+    calls = []
+    pdfs = tmp_path / "pdf"
+    pdfs.mkdir()
+    existing = pdfs / "1_1.pdf"
+    existing.write_bytes(b"%PDF-old")
+    catalog = [{"CodeVersion": f"{i}_1", "ApplyStatusCalculated": 1} for i in range(1, 6)]
+
+    def respond(request):
+        calls.append(request.url.params["id"])
+        return httpx.Response(500)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ValueError, match="трижды"):
+            official_catalog._fetch_pdfs(client, catalog, tmp_path, None)
+    assert calls == ["2_1", "2_1", "3_1", "3_1", "4_1", "4_1"]
+    assert existing.read_bytes() == b"%PDF-old"
+    assert json.loads((tmp_path / "unavailable.json").read_bytes()) == ["2_1", "3_1", "4_1"]
 
 
 def test_load_rejects_source_outside_official_domains(tmp_path):

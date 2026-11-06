@@ -121,7 +121,7 @@ class EvidenceEntry(DiagnosisEntry):
 
 
 class OfficialDocument(DiagnosisEntry):
-    state: Literal["indexed", "pending", "unavailable"]
+    state: Literal["indexed", "pending", "unavailable", "no_text"]
     scope: Literal["exact", "group"] = "exact"
 
     @model_validator(mode="after")
@@ -346,10 +346,18 @@ class OfficialIndex:
                               "МНН упомянуто в документе. Сверьте роль препарата и условия применения.") | {
                     "evidence_status": "UNCONFIRMED", "review_sources": mentions[:6],
                 }
-            if any(row.state == "unavailable" for row in documents):
-                return result("OFFICIAL_DOCUMENT_UNAVAILABLE", "Официальный документ для диагноза не удалось получить.")
-            if any(row.state == "pending" for row in documents):
-                return result("OFFICIAL_DOCUMENT_PENDING", "Для диагноза есть документ, который ещё не разобран.")
+            missing = (
+                ("unavailable", "OFFICIAL_DOCUMENT_UNAVAILABLE",
+                 "Не удалось скачать текст рекомендации из рубрикатора Минздрава."),
+                ("pending", "OFFICIAL_DOCUMENT_PENDING",
+                 "Карточка рекомендации есть в каталоге. Текст отсутствует в текущем индексе."),
+                ("no_text", "OFFICIAL_DOCUMENT_NO_TEXT",
+                 "PDF загружен. Поисковый текст из него извлечь не удалось."),
+            )
+            for state, reason, explanation in missing:
+                catalog = {doc.source.url: doc.source.citation() for doc in documents if doc.state == state}
+                if catalog:
+                    return result(reason, explanation) | {"catalog_sources": list(catalog.values())[:6]}
             return result("OFFICIAL_LINK_NOT_FOUND",
                           "Для этой пары связь не найдена в проверенных фрагментах текущей версии.")
         if len(regs) != 1 and any(row.registration for row in rows):

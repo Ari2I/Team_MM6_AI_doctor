@@ -25,7 +25,9 @@ def analyze_official(session: Session, application: Application, index: Official
         "effective_mode": "offline",
         "fallback_reason": None,
         "model_attempted": False,
+        "model_tokens": None,
         "model_summary": [],
+        "model_review_priorities": [],
         "analysis_run_id": str(uuid4()),
     }
     details = {}

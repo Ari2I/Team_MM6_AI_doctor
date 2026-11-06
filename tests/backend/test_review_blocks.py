@@ -136,6 +136,51 @@ def test_new_workbook_uses_b2b_with_public_material_only(client, monkeypatch, tm
     assert "Независимый тестовый препарат" not in repr(calls)
     assert client.get(f'/api/applications/{result["application_id"]}').json() == result
 
+def test_workbook_without_clinical_citations_uses_b2b_for_review_priorities(client, monkeypatch, tmp_path):
+    from app.api import applications
+    from app.services import official_explanation
+    from tests.backend.test_official_reference import make_reference
+
+    calls = []
+
+    class FakeProvider:
+        def __init__(self, *args, **kwargs):
+            assert kwargs["scope"] == "GIGACHAT_API_B2B"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def select_official_explanations(self, rows):
+            calls.extend(rows)
+            return {"selections": {str(r["row"]): 0 for r in rows}, "summary_rows": [rows[0]["row"]]}
+
+    monkeypatch.setattr(official_explanation, "GigaChatProvider", FakeProvider)
+    monkeypatch.setenv("GIGACHAT_CREDENTIALS", "synthetic")
+    monkeypatch.delenv("GIGACHAT_ACCESS_TOKEN", raising=False)
+    snapshot = tmp_path / "reference.json"
+    snapshot.write_text(make_reference().model_dump_json(), encoding="utf-8")
+    monkeypatch.setattr(applications, "official_path", lambda: snapshot)
+    book = Workbook()
+    book.active.append(["Торговое наименование", "Дозировка", "Количество", "Сумма", "Диагноз (из заключения)"])
+    book.active.append(["Независимый тестовый препарат", None, 1, 123.45, "K25.9"])
+    book.active.append(["Независимый тестовый препарат", None, 1, 100])
+    data = BytesIO()
+    book.save(data)
+    response = client.post("/api/applications", files={"file": ("независимый.xlsx", data.getvalue())})
+    assert response.status_code == 201
+    result = response.json()
+    assert result["model_attempted"] and result["effective_mode"] == "gigachat"
+    assert len(calls) == 1  # Одинаковая причина сверки обрабатывается одним пунктом.
+    assert all(not check["citations"] and not check["relationship_found"] and check["category"] is None
+               and check["model_review_action"] for check in result["checks"])
+    assert result["model_review_priorities"] and not result["model_summary"]
+    assert "K25.9" not in repr(calls) and "123.45" not in repr(calls)
+    assert "Независимый тестовый препарат" not in repr(calls)
+
+
 def test_upload_asks_for_sheet_and_column_choice(client, monkeypatch, tmp_path):
     from app.api import applications
     from tests.backend.test_official_reference import make_reference
