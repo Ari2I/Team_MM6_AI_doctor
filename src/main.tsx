@@ -66,7 +66,8 @@ const officialStatuses: Record<string, string> = {
   OFFICIAL_REGISTRATION_UNRESOLVED: 'Уточните форму препарата и РУ',
   OFFICIAL_LINK_NOT_FOUND: 'Связь в проверенных фрагментах не найдена',
   OFFICIAL_DOCUMENT_UNAVAILABLE: 'Документ недоступен',
-  OFFICIAL_DOCUMENT_PENDING: 'Документ ожидает разбора',
+  OFFICIAL_DOCUMENT_PENDING: 'Текст рекомендации отсутствует в индексе',
+  OFFICIAL_DOCUMENT_NO_TEXT: 'Из PDF не извлечён текст',
   OFFICIAL_DOCUMENT_MENTION: 'МНН упомянуто в документе',
   OFFICIAL_LINK_REQUIRES_REVIEW: 'Основание найдено',
   OFFICIAL_GROUP_LINK_REQUIRES_REVIEW: 'Найден документ для группы диагнозов',
@@ -98,6 +99,7 @@ function PurchaseRow({ check, item }: { check: Check; item: Purchase }) {
       {check.evidence_conditions.length > 0 && <ul className="issues">
         {check.evidence_conditions.map(condition => <li key={condition}>{condition}</li>)}
       </ul>}
+      {check.model_review_action && <p><strong>Шаг сверки по выбору GigaChat.</strong> {check.model_review_action}</p>}
       {check.rule_ids?.length > 0 && <small>Правила {check.rule_ids.join(', ')}</small>}
       {check.model_highlight && <details>
         <summary>Фрагмент, выделенный GigaChat</summary>
@@ -106,6 +108,10 @@ function PurchaseRow({ check, item }: { check: Check; item: Purchase }) {
       {check.citations.length > 0 && <details>
         <summary>Открыть источник</summary>
         {check.citations.map(citation => <Source key={citation.fragment_id + citation.quote} citation={citation}/>)}
+      </details>}
+      {check.catalog_sources?.length > 0 && <details>
+        <summary>Рекомендации в каталоге без доступного текста</summary>
+        {check.catalog_sources.map(citation => <Source key={citation.fragment_id} citation={citation}/>)}
       </details>}
       {check.review_sources.length > 0 && <details>
         <summary>Материалы для сверки</summary>
@@ -153,7 +159,10 @@ function ApplicationView({ result }: { result: Result }) {
       <div><small>Известная сумма</small><strong>{money.format(Number(result.known_total))}</strong></div>
       <div><small>Покупки / диагнозы</small><strong>{result.items.length} / {result.diagnoses.length}</strong></div>
       <div><small>{official ? 'Пары с найденными источниками' : 'Подтверждённые пары'}</small><strong>{supported} из {result.checks.length}</strong></div>
-      <div><small>Фактический режим</small><strong>{modes[result.effective_mode]}</strong><small>Поиск · {methods}</small></div>
+      <div><small>Фактический режим</small><strong>{modes[result.effective_mode]}</strong><small>Поиск · {methods}</small>
+        {result.model_tokens != null && <small>Токены GigaChat · {result.model_tokens.toLocaleString('ru-RU')}</small>}
+        {result.model_tokens == null && result.model_attempted && <small>Запрос в GigaChat отправлен</small>}
+      </div>
     </div>
     <p className="version">{official ? 'Официальный снимок' : 'Справочник'} {result.reference_version}
       {official && result.official_as_of ? ' · ГРЛС на ' + result.official_as_of : ''}
@@ -161,6 +170,10 @@ function ApplicationView({ result }: { result: Result }) {
     {result.recommendation && <div className="notice">
       <strong>Рекомендация секретарю</strong><p>{result.recommendation}</p>
       <AmountCards amounts={result.amounts_total}/>
+      {result.model_review_priorities?.length > 0 && <div>
+        <strong>Что сверить в первую очередь</strong>
+        <ul className="issues">{result.model_review_priorities.map(action => <li key={action}>{action}</li>)}</ul>
+      </div>}
       {result.model_summary?.length > 0 && <details><summary>Ключевые основания по выбору GigaChat</summary>
         {result.model_summary.map((citation, index) => <Source key={index} citation={citation}/>)}
       </details>}
