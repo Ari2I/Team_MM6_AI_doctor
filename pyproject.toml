@@ -19,6 +19,7 @@ dependencies = [
     "pandas>=2.2,<3",
     "openpyxl>=3.1,<4",
     "rapidfuzz>=3.9,<4",
+    "python-multipart>=0.0.9,<1",
 ]
 
 [project.optional-dependencies]

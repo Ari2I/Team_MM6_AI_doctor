@@ -6,6 +6,14 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
+DISCLAIMER = "Результат анализа носит рекомендательный характер и требует проверки человеком."
+# TODO: уточнить у аналитика названия категорий для отображения.
+CATEGORY_LABELS = {
+    "A": "Жизненно необходимые",
+    "B": "Сопутствующая терапия",
+    "V": "Сомнительные/опциональные",
+}
+
 
 class Settings(BaseSettings):
     """Параметры подключения к PostgreSQL без хранения секретов в коде."""

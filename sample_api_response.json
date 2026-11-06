@@ -1,0 +1,154 @@
+{
+  "application": {
+    "id": "71073b57-7d47-4f35-b425-cced48a563b7",
+    "filename": "sample_ok.xlsx",
+    "status": "analyzed",
+    "traffic_light": "red",
+    "requires_review": false,
+    "created_at": "2026-11-05T15:01:28.979925Z",
+    "summary": "Результат анализа: индикатор red; категория A — 76.78%, B — 15.66%, V — 7.56%, не определена — 0.00%. Результат носит рекомендательный характер; решение принимает человек.",
+    "warning_message": null,
+    "category_shares": {
+      "A": 76.78044171489312,
+      "B": 15.660800755875753,
+      "V": 7.558757529231133,
+      "A_amount": 6501.0,
+      "B_amount": 1326.0,
+      "V_amount": 640.0,
+      "total_amount": 8467.0,
+      "undetermined": 0.0,
+      "undetermined_amount": 0.0
+    }
+  },
+  "disclaimer": "Результат анализа носит рекомендательный характер и требует проверки человеком.",
+  "diagnoses": [
+    "Учебный диагноз 01",
+    "Учебный диагноз 02",
+    "Учебный диагноз 03"
+  ],
+  "items": [
+    {
+      "row_number": 2,
+      "drug_name": "Нурофен",
+      "mnn": "Демо-МНН-01",
+      "match_confidence": 1.0,
+      "amount": "1200.00",
+      "checks": [
+        {
+          "diagnosis": "Учебный диагноз 01",
+          "category": "A",
+          "category_label": "Жизненно необходимые",
+          "source": "Синтетический демо-справочник",
+          "reference_version": "demo-api-1",
+          "comment": null,
+          "needs_review": false,
+          "review_reason": null
+        }
+      ]
+    },
+    {
+      "row_number": 3,
+      "drug_name": "Но-шпа",
+      "mnn": "Демо-МНН-02",
+      "match_confidence": 1.0,
+      "amount": "850.50",
+      "checks": [
+        {
+          "diagnosis": "Учебный диагноз 01",
+          "category": "B",
+          "category_label": "Сопутствующая терапия",
+          "source": "Синтетический демо-справочник",
+          "reference_version": "demo-api-1",
+          "comment": null,
+          "needs_review": false,
+          "review_reason": null
+        }
+      ]
+    },
+    {
+      "row_number": 4,
+      "drug_name": "Панадол",
+      "mnn": "Демо-МНН-03",
+      "match_confidence": 1.0,
+      "amount": "2100.75",
+      "checks": [
+        {
+          "diagnosis": "Учебный диагноз 02",
+          "category": "A",
+          "category_label": "Жизненно необходимые",
+          "source": "Синтетический демо-справочник",
+          "reference_version": "demo-api-1",
+          "comment": null,
+          "needs_review": false,
+          "review_reason": null
+        }
+      ]
+    },
+    {
+      "row_number": 5,
+      "drug_name": "Конкор",
+      "mnn": "Демо-МНН-04",
+      "match_confidence": 1.0,
+      "amount": "640.00",
+      "checks": [
+        {
+          "diagnosis": "Учебный диагноз 02",
+          "category": "V",
+          "category_label": "Сомнительные/опциональные",
+          "source": "Синтетический демо-справочник",
+          "reference_version": "demo-api-1",
+          "comment": null,
+          "needs_review": false,
+          "review_reason": null
+        }
+      ]
+    },
+    {
+      "row_number": 6,
+      "drug_name": "Омез",
+      "mnn": "Демо-МНН-05",
+      "match_confidence": 1.0,
+      "amount": "3200.25",
+      "checks": [
+        {
+          "diagnosis": "Учебный диагноз 03",
+          "category": "A",
+          "category_label": "Жизненно необходимые",
+          "source": "Синтетический демо-справочник",
+          "reference_version": "demo-api-1",
+          "comment": null,
+          "needs_review": false,
+          "review_reason": null
+        }
+      ]
+    },
+    {
+      "row_number": 7,
+      "drug_name": "Супрастин",
+      "mnn": "Демо-МНН-06",
+      "match_confidence": 1.0,
+      "amount": "475.50",
+      "checks": [
+        {
+          "diagnosis": "Учебный диагноз 03",
+          "category": "B",
+          "category_label": "Сопутствующая терапия",
+          "source": "Синтетический демо-справочник",
+          "reference_version": "demo-api-1",
+          "comment": null,
+          "needs_review": false,
+          "review_reason": null
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "level": "warning",
+      "code": "multiple_diagnoses",
+      "message": "В заявке указано несколько разных диагнозов.",
+      "row": null,
+      "column": "diagnosis"
+    }
+  ]
+}

@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir ".[dev]"
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser alembic ./alembic
 COPY --chown=appuser:appuser tests ./tests
+COPY --chown=appuser:appuser data ./data
 
 USER appuser
 
