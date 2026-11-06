@@ -103,6 +103,8 @@ def reference_availability():
                      "diagnoses": len(snapshot.diagnoses),
                      "documents": len({row.source.url for row in snapshot.documents}),
                      "indexed_documents": len({page.url for page in snapshot.pages}),
+                     "original_documents": len({page.url for page in snapshot.pages if not page.copy_url}),
+                     "published_copies": len({page.url for page in snapshot.pages if page.copy_url}),
                      "rules": len(snapshot.rules)},
         "default": "official",
     }

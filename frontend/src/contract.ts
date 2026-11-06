@@ -17,7 +17,8 @@ export type Citation = {
   quote: string
   url: string | null
   publisher: string | null
-  origin: 'official' | 'synthetic'
+  origin: 'official' | 'synthetic' | 'published_copy'
+  copy_url: string | null
   retrieved_at: string | null
 }
 
@@ -31,6 +32,7 @@ export type Check = {
   citations: Citation[]
   review_sources: Citation[]
   catalog_sources: Citation[]
+  searched_sources: Citation[]
   relationship_found: boolean
   evidence_conditions: string[]
   rule_ids: string[]

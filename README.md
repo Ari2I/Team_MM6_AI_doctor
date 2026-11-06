@@ -55,6 +55,17 @@ npm --prefix frontend run build
 
 Снимок можно подключить через `OFFICIAL_REFERENCE_PATH`. Для Docker смонтируйте файл и укажите путь внутри контейнера. `GET /api/references` показывает объём и версии данных, в том числе число документов с доступным текстом и число правил. При импорте можно добавлять независимо подготовленные CSV кодов (`--diagnoses`), каталога (`--catalog`), выдержек (`--evidence`) и составов (`--compositions`).
 
+### Опубликованные копии рекомендаций
+
+Для согласованного резервного поиска скачайте копии по полной публичной карте ClinReky и создайте новый снимок на основе уже проверенного. Идентификатор редакции, обе ссылки на оригинал и название сверяются с каталогом Минздрава. Индексируются оригинальные фрагменты раздела лечения, извлечённые из опубликованной копии. Официальные PDF сохраняют приоритет.
+
+```powershell
+.\.venv\Scripts\python.exe -m app.services.published_copies --cache .local/official-inputs/rubricator --download
+.\.venv\Scripts\python.exe -m app.services.published_copies --cache .local/official-inputs/rubricator --snapshot .local/official-reference.json --output .local/official-reference-with-copies.json
+```
+
+Снимок `.local/official-reference-with-copies.json` выбирается при запуске, если `OFFICIAL_REFERENCE_PATH` не задан. После обновления официального снимка пересоберите его версию с копиями. В отчёте ссылка на копию идёт рядом с оригиналом. Поиск по копии даёт материал для ручной сверки и сам по себе не присваивает категорию А/Б/В. В `GET /api/references` объёмы оригиналов и копий показаны отдельно. [ClinReky](https://clinreky.ru/) · [Рубрикатор Минздрава](https://cr.minzdrav.gov.ru/)
+
 ### Согласованный свод А/Б/В
 
 Укажите при импорте `--rules path/to/approved-rules.json`. Свод содержит JSON-массив. Каждая запись задаёт `rule_id`, `revision`, `evidence_id`, `category` (латинские A, B или V) и `approval_reference`. Чтобы получить ID выдержки для свода, прочитайте `entry_id` соответствующей записи `EvidenceEntry` из снимка. В CSV выдержек поле `polarity` принимает `supports` для А/Б, `excludes` для В или `context` для информационных фрагментов. Связь без согласованного правила остаётся медицинским основанием для сверки. Поставка по умолчанию содержит официальные данные и выдержки. Утверждённый свод подключается отдельным импортом.

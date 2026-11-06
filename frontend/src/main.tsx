@@ -45,6 +45,8 @@ function Source({ citation }: { citation: Citation }) {
       ? <a href={citation.url} target="_blank" rel="noreferrer">{citation.title} ↗</a>
       : citation.title}
     </div>
+    {citation.origin === 'published_copy' && citation.copy_url?.startsWith('https://clinreky.ru/') &&
+      <div><a href={citation.copy_url} target="_blank" rel="noreferrer">Опубликованная копия ↗</a> · для сверки с оригиналом</div>}
     <small>{[citation.version, citation.location, citation.fragment_id, citation.publisher,
       citation.retrieved_at && ('получено ' + citation.retrieved_at)].filter(Boolean).join(' · ')}</small>
   </div>
@@ -69,6 +71,8 @@ const officialStatuses: Record<string, string> = {
   OFFICIAL_DOCUMENT_PENDING: 'Текст рекомендации отсутствует в индексе',
   OFFICIAL_DOCUMENT_NO_TEXT: 'Из PDF не извлечён текст',
   OFFICIAL_DOCUMENT_MENTION: 'МНН упомянуто в документе',
+  OFFICIAL_COPY_MENTION: 'МНН упомянуто в опубликованной копии',
+  OFFICIAL_COPY_LINK_NOT_FOUND: 'Упоминание МНН в разделах лечения не найдено',
   OFFICIAL_LINK_REQUIRES_REVIEW: 'Основание найдено',
   OFFICIAL_GROUP_LINK_REQUIRES_REVIEW: 'Найден документ для группы диагнозов',
 }
@@ -113,6 +117,10 @@ function PurchaseRow({ check, item }: { check: Check; item: Purchase }) {
         <summary>Рекомендации в каталоге без доступного текста</summary>
         {check.catalog_sources.map(citation => <Source key={citation.fragment_id} citation={citation}/>)}
       </details>}
+      {check.searched_sources?.length > 0 && <details>
+        <summary>Документы, по которым выполнен поиск</summary>
+        {check.searched_sources.map(citation => <Source key={citation.fragment_id} citation={citation}/>)}
+      </details>}
       {check.review_sources.length > 0 && <details>
         <summary>Материалы для сверки</summary>
         {check.review_sources.map(citation =>
@@ -141,6 +149,7 @@ function ApplicationView({ result }: { result: Result }) {
   const route = '/api/applications/' + result.application_id
   const official = result.reference_profile === 'official'
   const supported = result.checks.filter(row => official ? row.relationship_found : row.evidence_status === 'SUPPORTED').length
+  const searched = result.checks.filter(row => row.searched_sources?.length || row.review_sources.length || row.citations.length).length
   const methods = [...new Set(result.checks.map(check =>
     check.retrieval === 'vector' ? 'векторный' : 'лексический'))].join(' / ')
   return <section className="result" aria-label="Результат">
@@ -158,7 +167,9 @@ function ApplicationView({ result }: { result: Result }) {
     <div className="metrics">
       <div><small>Известная сумма</small><strong>{money.format(Number(result.known_total))}</strong></div>
       <div><small>Покупки / диагнозы</small><strong>{result.items.length} / {result.diagnoses.length}</strong></div>
-      <div><small>{official ? 'Пары с найденными источниками' : 'Подтверждённые пары'}</small><strong>{supported} из {result.checks.length}</strong></div>
+      <div><small>{official ? 'Пары со связью в справочнике' : 'Подтверждённые пары'}</small><strong>{supported} из {result.checks.length}</strong>
+        {official && <small>Тексты доступны для {searched} из {result.checks.length}</small>}
+      </div>
       <div><small>Фактический режим</small><strong>{modes[result.effective_mode]}</strong><small>Поиск · {methods}</small>
         {result.model_tokens != null && <small>Токены GigaChat · {result.model_tokens.toLocaleString('ru-RU')}</small>}
         {result.model_tokens == null && result.model_attempted && <small>Запрос в GigaChat отправлен</small>}

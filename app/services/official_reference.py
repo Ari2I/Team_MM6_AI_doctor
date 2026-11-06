@@ -121,7 +121,7 @@ class EvidenceEntry(DiagnosisEntry):
 
 
 class OfficialDocument(DiagnosisEntry):
-    state: Literal["indexed", "pending", "unavailable", "no_text"]
+    state: Literal["indexed", "copy_indexed", "pending", "unavailable", "no_text"]
     scope: Literal["exact", "group"] = "exact"
 
     @model_validator(mode="after")
@@ -135,6 +135,15 @@ class OfficialPage(Record):
     url: Text
     number: Annotated[int, Field(ge=1)]
     text: Text
+    location: Text | None = None
+    copy_url: Text | None = None
+
+    @field_validator("copy_url")
+    @classmethod
+    def published_copy_https(cls, value: str | None) -> str | None:
+        if value is not None and not re.fullmatch(r"https://clinreky\.ru/nosology/[A-Za-z0-9._-]+/", value):
+            raise ValueError("Ожидается ссылка на опубликованную копию ClinReky.")
+        return value
 
     @field_validator("url")
     @classmethod
@@ -266,7 +275,7 @@ class OfficialIndex:
         }
 
     @lru_cache(maxsize=2048)
-    def _mentions(self, mnn: str, url: str) -> tuple[tuple[int, str], ...]:
+    def _mentions(self, mnn: str, url: str) -> tuple[tuple[OfficialPage, str], ...]:
         components = inn_key(mnn).split("+")
         patterns = [re.compile(r"(?<!\w)" + re.escape(component) + r"(?!\w)", re.IGNORECASE) for component in components]
         found = []
@@ -275,11 +284,22 @@ class OfficialIndex:
             for first in patterns[0].finditer(searchable):
                 start, end = max(0, first.start() - 220), min(len(page.text), first.end() + 300)
                 if all(pattern.search(searchable, start, end) for pattern in patterns[1:]):
-                    found.append((page.number, page.text[start:end].strip()))
+                    found.append((page, page.text[start:end].strip()))
                     break
             if len(found) >= 3:
                 break
         return tuple(found)
+
+    @staticmethod
+    def _text_citation(document: OfficialDocument, page: OfficialPage, quote: str | None = None) -> dict:
+        citation = document.source.model_copy(update={
+            "location": (page.location or f"Страница PDF {page.number}") if quote else
+                        ("Разделы лечения" if page.copy_url else "Доступный текст документа"),
+            "quote": quote or document.source.title,
+        }).citation()
+        if page.copy_url:
+            citation.update(origin="published_copy", copy_url=page.copy_url)
+        return citation
 
     def lookup(self, drug: DrugResolution, diagnosis: str, *, block_mnns: frozenset[str] = frozenset()) -> dict:
         def result(reason: str, text: str, rows: tuple | list = ()) -> dict:
@@ -335,15 +355,22 @@ class OfficialIndex:
             rows.extend(row for row in self.pairs.get((parent, inn_key(drug.mnn)), ())
                         if row.scope == "group" and (row.registration is None or name_key(row.registration) in regs))
         if not rows:
-            mentions = []
-            for document in {row.source.url: row for row in documents if row.state == "indexed"}.values():
-                for page, quote in self._mentions(drug.mnn, document.source.url):
-                    mentions.append(document.source.model_copy(update={
-                        "location": f"Страница PDF {page}", "quote": quote,
-                    }).citation())
+            mentions, searched = [], []
+            indexed = {row.source.url: row for row in documents if row.state in {"indexed", "copy_indexed"}}
+            for url, document in indexed.items():
+                pages = self.pages.get(url, ())
+                if not pages:
+                    continue
+                searched.append(self._text_citation(document, pages[0]))
+                for page, quote in self._mentions(drug.mnn, url):
+                    mentions.append(self._text_citation(document, page, quote))
             if mentions:
-                return result("OFFICIAL_DOCUMENT_MENTION",
-                              "МНН упомянуто в документе. Сверьте роль препарата и условия применения.") | {
+                only_copies = all(source["origin"] == "published_copy" for source in mentions)
+                reason = "OFFICIAL_COPY_MENTION" if only_copies else "OFFICIAL_DOCUMENT_MENTION"
+                explanation = ("МНН упомянуто в опубликованной копии. Сверьте роль препарата с оригиналом."
+                               if only_copies else
+                               "МНН упомянуто в документе. Сверьте роль препарата и условия применения.")
+                return result(reason, explanation) | {
                     "evidence_status": "UNCONFIRMED", "review_sources": mentions[:6],
                 }
             missing = (
@@ -357,9 +384,18 @@ class OfficialIndex:
             for state, reason, explanation in missing:
                 catalog = {doc.source.url: doc.source.citation() for doc in documents if doc.state == state}
                 if catalog:
-                    return result(reason, explanation) | {"catalog_sources": list(catalog.values())[:6]}
+                    return result(reason, explanation) | {
+                        "catalog_sources": list(catalog.values())[:6], "searched_sources": searched[:6],
+                    }
+            if any(source["origin"] == "published_copy" for source in searched):
+                return result("OFFICIAL_COPY_LINK_NOT_FOUND",
+                              "В проиндексированных разделах лечения явное упоминание МНН не найдено.") | {
+                    "searched_sources": searched[:6],
+                }
             return result("OFFICIAL_LINK_NOT_FOUND",
-                          "Для этой пары связь не найдена в проверенных фрагментах текущей версии.")
+                          "Для этой пары связь не найдена в проверенных фрагментах текущей версии.") | {
+                "searched_sources": searched[:6],
+            }
         if len(regs) != 1 and any(row.registration for row in rows):
             return result("OFFICIAL_REGISTRATION_UNRESOLVED",
                           "Варианты препарата имеют разные РУ. Уточните форму для проверки показания.", rows)
@@ -411,8 +447,12 @@ def official_path() -> Path | None:
     configured = os.getenv("OFFICIAL_REFERENCE_PATH")
     if configured:
         return Path(configured)
-    local = ROOT / ".local" / "official-reference.json"
-    return local if local.is_file() else None
+    directory = ROOT / ".local"
+    for name in ("official-reference-with-copies.json", "official-reference.json"):
+        local = directory / name
+        if local.is_file():
+            return local
+    return None
 
 
 COLUMNS = {

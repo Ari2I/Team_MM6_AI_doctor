@@ -40,7 +40,8 @@ class ItemResult(BaseModel):
 class SourceCitation(Citation):
     url: str | None
     publisher: str | None
-    origin: Literal["official", "synthetic"]
+    origin: Literal["official", "synthetic", "published_copy"]
+    copy_url: str | None = None
     retrieved_at: str | None
 
 
@@ -78,6 +79,7 @@ class CheckResult(BaseModel):
     citations: list[SourceCitation] = Field(default_factory=list)
     review_sources: list[SourceCitation] = Field(default_factory=list)
     catalog_sources: list[SourceCitation] = Field(default_factory=list)
+    searched_sources: list[SourceCitation] = Field(default_factory=list)
     evidence_conditions: list[str] = Field(default_factory=list)
     rule_ids: list[str] = Field(default_factory=list)
     model_highlight: SourceCitation | None = None

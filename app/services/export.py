@@ -86,7 +86,7 @@ def build_xlsx(result: ApplicationResult) -> bytes:
                      "Код причины", "Пояснение", "Ручная проверка", "Фрагмент", "Режим", "Поиск", "Резерв",
                      "Условия из источника", "Правила", "Фрагмент по выбору GigaChat", "Шаг сверки по выбору GigaChat"])
     _append(sources, ["Строка", "Диагноз", "Фрагмент", "Источник", "Версия", "Раздел",
-                      "Цитата", "URL", "Издатель", "Дата получения", "Назначение"])
+                      "Цитата", "URL оригинала", "Издатель", "Дата получения", "Назначение", "URL опубликованной копии"])
     for row in result.checks:
         item = items[row.item_id]
         status = _status(row)
@@ -100,12 +100,16 @@ def build_xlsx(result: ApplicationResult) -> bytes:
             [(c, "Подтверждение") for c in row.citations]
             + [(c, "Материал для сверки") for c in row.review_sources]
             + [(c, "Карточка каталога без доступного текста") for c in row.catalog_sources]
+            + [(c, "Документ, по которому выполнен поиск") for c in row.searched_sources]
         ):
             _append(sources, [item.row_number, names[row.diagnosis_id], citation.fragment_id,
                               citation.title, citation.version, citation.location, citation.quote,
-                              safe_https(citation.url), citation.publisher, citation.retrieved_at, purpose])
+                              safe_https(citation.url), citation.publisher, citation.retrieved_at, purpose,
+                              safe_https(citation.copy_url)])
             if safe_https(citation.url):
                 sources.cell(sources.max_row, 8).hyperlink = citation.url
+            if safe_https(citation.copy_url):
+                sources.cell(sources.max_row, 12).hyperlink = citation.copy_url
     _append(summary, ["Диагноз / показатель", "Индикатор / значение", "Причина",
                       "А, ₽", "Б, ₽", "В, ₽", "Не определено, ₽",
                       "А, %", "Б, %", "В, %", "Не определено, %"])
@@ -155,7 +159,7 @@ def build_xlsx(result: ApplicationResult) -> bytes:
                           issue.code, issue.message])
     _format(application, [10, 24, 20, 36, 18, 20, 20, 18, 34])
     _format(checks, [10, 24, 34, 12, 36, 28, 55, 16, 23, 16, 16, 25, 52, 26, 32, 45])
-    _format(sources, [10, 34, 22, 35, 22, 25, 58, 40, 20, 18, 23])
+    _format(sources, [10, 34, 22, 35, 22, 25, 58, 40, 20, 18, 29, 42])
     _format(summary, [34, 25, 55, 17, 17, 17, 19, 12, 12, 12, 19])
     output = BytesIO()
     workbook.save(output)
@@ -169,8 +173,10 @@ def build_html(result: ApplicationResult) -> str:
     def cite(row):
         url = safe_https(row.url)
         title = f'<a href="{e(url)}">{e(row.title)}</a>' if url else e(row.title)
+        copy_url = safe_https(row.copy_url)
+        copy = f' · <a href="{e(copy_url)}">Опубликованная копия</a> для сверки' if copy_url else ""
         return (f"<li><blockquote>{e(row.quote)}</blockquote>{title} · {e(row.version)} · "
-                f"{e(row.location)} · {e(row.fragment_id)} · получено {e(row.retrieved_at)}</li>")
+                f"{e(row.location)} · {e(row.fragment_id)} · получено {e(row.retrieved_at)}{copy}</li>")
 
     names = {diag.diagnosis_id: f"{diag.name} · строка {diag.source_row}" if diag.source_row else diag.name
              for diag in result.diagnoses}
@@ -186,6 +192,9 @@ def build_html(result: ApplicationResult) -> str:
             source_list = f"<ul>{citations}</ul>" if citations else ""
             if check.evidence_conditions:
                 source_list += "<p>" + "<br>".join(e(x) for x in check.evidence_conditions) + "</p>"
+            if check.searched_sources:
+                searched = "".join(cite(c) for c in check.searched_sources)
+                source_list += f"<p>Документы, по которым выполнен поиск</p><ul>{searched}</ul>"
             if check.catalog_sources:
                 catalog = "".join(cite(c) for c in check.catalog_sources)
                 source_list += f"<p>Рекомендации в каталоге без доступного текста</p><ul>{catalog}</ul>"
