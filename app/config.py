@@ -12,6 +12,23 @@ CATEGORY_LABELS = {
     "A": "Жизненно необходимые",
     "B": "Сопутствующая терапия",
     "V": "Сомнительные/опциональные",
+    "undetermined": "Не определена",
+}
+
+TRAFFIC_LIGHT_COLORS = {
+    "green": "C6EFCE",
+    "yellow": "FFEB9C",
+    "red": "FFC7CE",
+    "undetermined": "D9D9D9",
+}
+
+REVIEW_REASON_LABELS = {
+    "DRUG_NOT_FOUND": "Препарат не найден в справочнике.",
+    "DRUG_AMBIGUOUS": "Препарат сопоставлен неоднозначно.",
+    "DIAGNOSIS_NOT_FOUND": "Диагноз не найден в справочнике.",
+    "NO_RULE_FOR_PAIR": "Для пары препарат — диагноз нет правила.",
+    "LOW_CONFIDENCE": "Недостаточная уверенность сопоставления.",
+    "CONFLICTING_CATEGORIES": "Получены разные категории для диагнозов препарата.",
 }
 
 

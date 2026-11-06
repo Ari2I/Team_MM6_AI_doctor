@@ -179,3 +179,25 @@ def test_request_errors_are_sanitized(client: TestClient) -> None:
 def test_missing_application_is_404(client: TestClient) -> None:
     response = client.get("/applications/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
+
+
+def test_download_report(client: TestClient) -> None:
+    created = client.post(
+        "/applications",
+        files={"file": ("sample_ok.xlsx", (DATA_DIR / "sample_ok.xlsx").read_bytes())},
+    )
+    assert created.status_code == 201
+    card = created.json()
+    application_id = card["application"]["id"]
+    response = client.get(f"/applications/{application_id}/report.xlsx")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert response.headers["content-disposition"] == (
+        f'attachment; filename="application-{application_id}.xlsx"'
+    )
+    workbook = load_workbook(BytesIO(response.content))
+    assert workbook.sheetnames == ["Сводка", "Препараты", "Предупреждения"]
+    assert workbook["Препараты"].max_row - 1 == sum(len(item["checks"]) for item in card["items"])
+    assert client.get(f"/applications/{application_id}").json() == card

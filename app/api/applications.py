@@ -9,7 +9,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -33,6 +33,7 @@ from app.schemas.application_api import (
 )
 from app.services.analysis import analyze_application
 from app.services.excel_parser import ExcelParseError, parse_excel
+from app.services.report import build_report
 from app.services.validator import validate_file, validate_parse_result
 
 router = APIRouter(prefix="/applications", tags=["applications"])
@@ -266,3 +267,47 @@ def get_application(
             },
         )
     return _card(application)
+
+
+@router.get(
+    "/{application_id}/report.xlsx",
+    response_class=Response,
+    summary="Скачать отчёт по заявке в Excel",
+    responses={
+        200: {
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                    "schema": {"type": "string", "format": "binary"}
+                }
+            }
+        },
+        404: {"model": APIErrors, "description": "Заявка не найдена"},
+        409: {"model": APIErrors, "description": "Анализ заявки не завершён"},
+    },
+)
+def get_application_report(
+    application_id: UUID, session: Annotated[Session, Depends(get_session)]
+) -> Response:
+    application = _load_application(session, application_id)
+    if application is None:
+        code, message, status_code = "not_found", "Заявка не найдена.", 404
+    elif application.status != ApplicationStatus.ANALYZED:
+        code, message, status_code = (
+            "report_not_ready",
+            "Отчёт доступен только после завершения анализа заявки.",
+            409,
+        )
+    else:
+        return Response(
+            content=build_report(_card(application)),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="application-{application_id}.xlsx"'
+            },
+        )
+    return JSONResponse(
+        status_code=status_code,
+        content=APIErrors(
+            errors=[APIIssue(level="critical", code=code, message=message)]
+        ).model_dump(mode="json"),
+    )
