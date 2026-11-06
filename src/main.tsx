@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { Check, Citation, Issue, Light, Mode, Purchase, Result } from './contract'
+import type { Check, Citation, Issue, Light, Mode, Purchase, ReferenceProfile, Result } from './contract'
 import './style.css'
 
 const money = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' })
@@ -51,11 +51,22 @@ function PurchaseRow({ check, item }: { check: Check; item: Purchase }) {
     <th scope="row">{item.drug_name || 'Название отсутствует'}
       <small>{item.mnn || (item.match_candidates.length
         ? 'Возможные МНН · ' + item.match_candidates.join(', ') : 'МНН не определено')}</small>
+      {!!item.official_drug?.registration_count && <details>
+        <summary>Реестр и состав · {item.official_drug.registration_count} РУ</summary>
+        {item.official_drug.registrations.map(row => <div key={row.source.fragment_id}>
+          <small>{row.trade_name} · {row.registration} · {row.form}</small>
+          <Source citation={row.source}/>
+        </div>)}
+        {item.official_drug.compositions.length ? item.official_drug.compositions.map(row =>
+          <div key={row.source.fragment_id}><small>Состав · {row.registration} · {row.form}</small>
+            <Source citation={row.source}/></div>
+        ) : <small>Выдержка о составе из инструкции отсутствует в снимке.</small>}
+      </details>}
     </th>
     <td className="money">{item.amount === null ? '—' : money.format(Number(item.amount))}</td>
     <td><span className={check.category ? 'category' : 'muted'}>{check.category || '—'}</span></td>
     <td>
-      <div className="evidence">{evidence[check.evidence_status]}</div>
+      <div className="evidence">{check.relationship_found ? 'Источник найден · требуется сверка' : evidence[check.evidence_status]}</div>
       <p>{check.explanation}</p>
       {check.citations.length > 0 && <details>
         <summary>Открыть источник</summary>
@@ -63,6 +74,7 @@ function PurchaseRow({ check, item }: { check: Check; item: Purchase }) {
       </details>}
       {check.review_sources.length > 0 && <details>
         <summary>Материалы для сверки</summary>
+        {check.evidence_conditions.map(condition => <p key={condition}>{condition}</p>)}
         {check.review_sources.map(citation =>
           <Source key={citation.fragment_id + citation.quote} citation={citation}/>)}
       </details>}
@@ -77,7 +89,8 @@ function ApplicationView({ result }: { result: Result }) {
   const checks = result.checks.filter(row => row.diagnosis_id === selected)
   const items = new Map(result.items.map(row => [row.item_id, row]))
   const route = '/api/applications/' + result.application_id
-  const supported = result.checks.filter(row => row.evidence_status === 'SUPPORTED').length
+  const official = result.reference_profile === 'official'
+  const supported = result.checks.filter(row => official ? row.relationship_found : row.evidence_status === 'SUPPORTED').length
   const methods = [...new Set(result.checks.map(check =>
     check.retrieval === 'vector' ? 'векторный' : 'лексический'))].join(' / ')
   return <section className="result" aria-label="Результат">
@@ -95,10 +108,12 @@ function ApplicationView({ result }: { result: Result }) {
     <div className="metrics">
       <div><small>Известная сумма</small><strong>{money.format(Number(result.known_total))}</strong></div>
       <div><small>Покупки / диагнозы</small><strong>{result.items.length} / {result.diagnoses.length}</strong></div>
-      <div><small>Подтверждённые пары</small><strong>{supported} из {result.checks.length}</strong></div>
+      <div><small>{official ? 'Пары с найденными источниками' : 'Подтверждённые пары'}</small><strong>{supported} из {result.checks.length}</strong></div>
       <div><small>Фактический режим</small><strong>{modes[result.effective_mode]}</strong><small>Поиск · {methods}</small></div>
     </div>
-    <p className="version">Справочник {result.reference_version} · корпус {result.corpus_version}</p>
+    <p className="version">{official ? 'Официальный снимок' : 'Справочник'} {result.reference_version}
+      {official && result.official_as_of ? ' · ГРЛС на ' + result.official_as_of : ''}</p>
+    {official && <p className="notice">Категории А/Б/В определяются правилами комиссии. В отчёте показаны найденные документы для сверки.</p>}
     {result.fallback_reason && <div className="notice">Локальный результат сохранён. {fallbackLabels[result.fallback_reason] || result.fallback_reason}</div>}
     {result.issues.length > 0 && <details className="notice" open>
       <summary>Замечания к Excel · {result.issues.length}</summary>
@@ -112,11 +127,11 @@ function ApplicationView({ result }: { result: Result }) {
     {summary && <div className="diagnosis">
       <div className="light-line"><span className={'badge ' + summary.traffic_light}>{lights[summary.traffic_light]}</span>
         <span>{summary.reason}</span></div>
-      <div className="shares">{(['А', 'Б', 'В', 'undetermined'] as const).map(key =>
+      {!official && <div className="shares">{(['А', 'Б', 'В', 'undetermined'] as const).map(key =>
         <div key={key}><small>{key === 'undetermined' ? 'Не определено' : 'Категория ' + key}</small>
           <strong>{money.format(Number(summary.amounts[key]))}</strong>
           <small>{percent.format(Number(summary.shares[key]))}%</small></div>
-      )}</div>
+      )}</div>}
       <div className="table-scroll">
         <table><thead><tr><th>Строка</th><th>Препарат</th><th>Сумма</th><th>Категория</th><th>Основание</th></tr></thead>
           <tbody>{checks.map(check =>
@@ -137,6 +152,8 @@ async function readResponse(response: Response): Promise<Result> {
 
 function App() {
   const [file, setFile] = useState<File | null>(null)
+  const [reference, setReference] = useState<ReferenceProfile | null>(null)
+  const [officialAvailable, setOfficialAvailable] = useState(false)
   const [mode, setMode] = useState<'offline' | 'gigachat'>('offline')
   const [result, setResult] = useState<Result | null>(null)
   const [issues, setIssues] = useState<Issue[]>([])
@@ -168,9 +185,17 @@ function App() {
   }
 
   useEffect(() => {
+    const controller = new AbortController()
+    void fetch('/api/references', { signal: controller.signal })
+      .then(response => response.json())
+      .then(data => {
+        setOfficialAvailable(Boolean(data.official))
+        setReference(data.default === 'official' ? 'official' : 'demo')
+      })
+      .catch(() => { if (!controller.signal.aborted) setReference('demo') })
     const saved = new URLSearchParams(location.search).get('application')
     if (saved) void request('/api/applications/' + encodeURIComponent(saved))
-    return () => current.current?.abort()
+    return () => { controller.abort(); current.current?.abort() }
   }, [])
 
   function choose(value: File | null) {
@@ -185,10 +210,11 @@ function App() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!file) return
+    if (!file || !reference) return
     const form = new FormData()
     form.set('file', file)
-    form.set('mode', mode)
+    form.set('reference', reference)
+    form.set('mode', reference === 'official' ? 'offline' : mode)
     setResult(null)
     void request('/api/applications', form)
   }
@@ -208,19 +234,24 @@ function App() {
           <label className="file-label">Файл заявки (.xlsx)
             <input type="file" accept=".xlsx" required onChange={event => choose(event.target.files?.[0] ?? null)}/>
           </label>
-          <label>Режим пояснений<select value={mode} onChange={event => setMode(event.target.value === 'gigachat' ? 'gigachat' : 'offline')}>
-            <option value="offline">Локальный</option><option value="gigachat">GigaChat · только демо-файл</option>
+          <label>Справочник<select value={reference || ''} disabled={!reference} onChange={event => setReference(event.target.value === 'official' ? 'official' : 'demo')}>
+            {!reference && <option value="">Загрузка…</option>}
+            <option value="official" disabled={!officialAvailable}>Официальные источники</option>
+            <option value="demo">Демонстрационный</option>
           </select></label>
-          <button className="button primary" type="submit" disabled={!file || busy}>{busy ? 'Обработка…' : 'Проверить заявку'}</button>
+          {reference === 'demo' && <label>Режим пояснений<select value={mode} onChange={event => setMode(event.target.value === 'gigachat' ? 'gigachat' : 'offline')}>
+            <option value="offline">Локальный</option><option value="gigachat">GigaChat · только демо-файл</option>
+          </select></label>}
+          <button className="button primary" type="submit" disabled={!file || !reference || busy}>{busy ? 'Обработка…' : 'Проверить заявку'}</button>
         </div>
-        {mode === 'gigachat' && <p className="hint">Для вызова GigaChat используется исходный синтетический файл из ссылки выше.</p>}
+        {reference === 'demo' && mode === 'gigachat' && <p className="hint">Для вызова GigaChat используется исходный синтетический файл из ссылки выше.</p>}
       </form>
       {busy && <p role="status" className="notice">Проверка выполняется…</p>}
       {(issues.length > 0 || message) && <div role="alert" className="notice error">
         <strong>Заявка не обработана</strong>{message && <p>{message}</p>}{issues.length > 0 && <IssueList issues={issues}/>}
       </div>}
       {result && <ApplicationView key={result.application_id} result={result}/>}
-      <p className="bottom-note">Используется демонстрационный набор правил. Решение о выплате принимает комиссия.</p>
+      <p className="bottom-note">Результат проверки передаётся специалисту. Решение о выплате принимает комиссия.</p>
     </main>
   </>
 }

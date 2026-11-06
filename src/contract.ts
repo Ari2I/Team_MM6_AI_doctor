@@ -30,6 +30,8 @@ export type Check = {
   reason_code: string
   citations: Citation[]
   review_sources: Citation[]
+  relationship_found: boolean
+  evidence_conditions: string[]
   effective_mode: Mode
   retrieval: 'lexical' | 'vector'
   fallback_reason: string | null
@@ -42,9 +44,18 @@ export type Purchase = {
   mnn: string | null
   amount: string | null
   match_candidates: string[]
+  official_drug: {
+    registration_count: number
+    registrations: { registration: string; trade_name: string; form: string; source: Citation }[]
+    compositions: { registration: string; form: string; source: Citation }[]
+  } | null
 }
 
+export type ReferenceProfile = 'official' | 'demo'
 export type Result = {
+  reference_profile: ReferenceProfile
+  official_as_of: string | null
+  official_coverage: 'registry_export' | 'limited' | 'historical' | null
   application_id: string
   filename: string
   diagnoses: { diagnosis_id: string; name: string }[]
