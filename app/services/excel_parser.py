@@ -9,7 +9,7 @@ from unicodedata import category
 import pandas as pd
 
 from app.column_synonyms import COLUMN_SYNONYMS, HEADER_SEARCH_ROWS
-from app.schemas.parsing import ParsedItem, ParseIssue, ParseResult
+from app.schemas.parsing import ParsedDemoItem, ParsedItem, ParseIssue, ParseResult
 
 _NUMBER_PATTERN = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 
@@ -99,11 +99,15 @@ def _map_columns(
 
 
 def _parse_item(
-    row: tuple[object, ...], row_number: int, columns: dict[str, int], issues: list[ParseIssue]
+    row: tuple[object, ...], row_number: int, columns: dict[str, int], issues: list[ParseIssue],
+    *, preserve_cells: bool = False,
 ) -> ParsedItem:
     values: dict[str, str | Decimal | None] = {}
+    original_cells = {}
     for field, index in columns.items():
         value = row[index]
+        if preserve_cells:
+            original_cells[field] = str(value) if _clean_text(value) is not None else None
         if field in ("quantity", "amount"):
             number = parse_number(value)
             values[field] = number
@@ -118,10 +122,12 @@ def _parse_item(
                 )
         else:
             values[field] = _clean_text(value)
+    if preserve_cells:
+        return ParsedDemoItem(row_number=row_number, original_cells=original_cells, **values)
     return ParsedItem(row_number=row_number, **values)
 
 
-def parse_excel(source: bytes | BinaryIO) -> ParseResult:
+def parse_excel(source: bytes | BinaryIO, *, demo: bool = False) -> ParseResult:
     """Прочитать первый лист XLSX из байтов или открытого бинарного файла.
 
     Если книга открылась, но заголовки не распознаны, вернуть HEADER_NOT_FOUND
@@ -129,7 +135,8 @@ def parse_excel(source: bytes | BinaryIO) -> ParseResult:
     """
     stream = BytesIO(source) if isinstance(source, bytes) else source
     try:
-        with pd.ExcelFile(stream, engine="openpyxl") as workbook:
+        engine_kwargs = {"data_only": False} if demo else None
+        with pd.ExcelFile(stream, engine="openpyxl", engine_kwargs=engine_kwargs) as workbook:
             if not workbook.sheet_names:
                 raise ExcelParseError("В файле Excel нет доступных листов.")
             frame = pd.read_excel(
@@ -168,5 +175,12 @@ def parse_excel(source: bytes | BinaryIO) -> ParseResult:
     ):
         if all(_clean_text(value) is None for value in row):
             continue
-        result.items.append(_parse_item(row, row_number, columns, result.issues))
+        if demo and columns and all(
+            synonyms.get(normalize_header(row[index])) == field for field, index in columns.items()
+        ):
+            result.issues.append(ParseIssue(
+                code="REPEATED_HEADER", row=row_number, message="Повтор строки заголовка пропущен.",
+            ))
+            continue
+        result.items.append(_parse_item(row, row_number, columns, result.issues, preserve_cells=demo))
     return result

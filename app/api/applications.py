@@ -1,0 +1,154 @@
+"""Демонстрационный HTTP API заявок и выгрузок."""
+
+from hashlib import sha256
+from io import BytesIO
+import logging
+from xml.etree.ElementTree import ParseError
+from pathlib import PurePath
+from typing import Annotated, Literal
+from uuid import UUID
+from zipfile import BadZipFile, ZipFile
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.config import get_validation_settings
+from app.models.reference import ReferenceVersion
+from app.schemas.demo_result import ApplicationResult
+from app.services.analysis import AnalysisError
+from app.services.application_io import (
+    MAX_DIAGNOSES, MAX_ITEMS, application_diagnoses, enrich_saved_application,
+    load_result, save_and_analyze, validate_amounts,
+)
+from app.services.excel_parser import ExcelParseError, parse_excel
+from app.services.export import build_html, build_xlsx
+from app.services.reference_seed import DEMO_FILE, load_bundle
+from app.services.validator import validate_file, validate_parse_result
+from app.services.workbook_limits import WorkbookTooLarge, check_sheet_bounds
+
+router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
+DEMO_SHA256 = "4c53c2f1902625fe617425b637aa9c4c83fbe591f9d3b990ab8740b987f51f1a"
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+MAX_EXPANDED_SIZE = 50 * 1024 * 1024
+
+
+def sessions():
+    from app.db.session import SessionLocal
+    return SessionLocal
+
+
+def issue(code: str, message: str) -> dict:
+    return {"level": "critical", "code": code, "message": message, "row": None, "column": None}
+
+
+def reject(status: int, *issues: dict):
+    raise HTTPException(status_code=status, detail={"issues": issues})
+
+
+def read_application(application_id: UUID) -> ApplicationResult:
+    try:
+        with sessions()() as session:
+            result = load_result(session, application_id)
+    except SQLAlchemyError:
+        reject(503, issue("storage_unavailable", "Хранилище заявок недоступно."))
+    if result is None:
+        reject(404, issue("application_not_found", "Завершённая заявка не найдена."))
+    return result
+
+
+@router.get("/ready")
+def readiness():
+    try:
+        bundle = load_bundle()
+        with sessions()() as session:
+            active = session.scalars(select(ReferenceVersion).where(ReferenceVersion.is_active)).all()
+            if len(active) != 1 or active[0].fingerprint != bundle.content_digest:
+                reject(503, issue("reference_unavailable", "Активируйте справочник демо."))
+            # Проверяется наличие таблиц результата и новых колонок миграции.
+            from app.models.application import Application, ItemCheck
+            session.execute(select(Application.demo_meta).limit(0))
+            session.execute(select(ItemCheck.evidence).limit(0))
+    except (SQLAlchemyError, ValueError, OSError):
+        reject(503, issue("storage_unavailable", "Проверьте БД, миграции и справочник."))
+    return {"status": "ready", "reference_version": bundle.reference_version}
+
+
+@router.get("/demo.xlsx")
+def demo_file():
+    return FileResponse(DEMO_FILE, media_type=XLSX, filename="demo.xlsx")
+
+
+@router.post("/applications", response_model=ApplicationResult, status_code=201)
+def create_application(
+    file: Annotated[UploadFile, File()],
+    mode: Annotated[Literal["offline", "gigachat"], Form()] = "offline",
+):
+    limit = get_validation_settings().max_excel_size_bytes
+    filename = PurePath((file.filename or "").replace("\\", "/")).name.replace("\x00", "")[:255]
+    content = file.file.read(limit + 1)
+    report = validate_file(filename, max(file.size or 0, len(content)))
+    if not report.is_valid:
+        reject(413 if any(i.code == "file_too_large" for i in report.issues) else 422,
+               *(i.model_dump(mode="json") for i in report.issues))
+    if mode == "gigachat" and sha256(content).hexdigest() != DEMO_SHA256:
+        reject(422, issue("unapproved_demo_file", "Для GigaChat загрузите исходный файл «Демо Excel»."))
+    try:
+        with ZipFile(BytesIO(content)) as archive:
+            entries = archive.infolist()
+            if len(entries) > 1000 or sum(entry.file_size for entry in entries) > MAX_EXPANDED_SIZE:
+                reject(413, issue("workbook_too_large", "Внутренний объём книги превышает лимит."))
+            check_sheet_bounds(archive)
+        parsed = parse_excel(content, demo=True)
+    except WorkbookTooLarge:
+        reject(413, issue("workbook_too_large", "Координаты ячеек превышают размеры шаблона демо."))
+    except (BadZipFile, ParseError, KeyError, RuntimeError, ValueError):
+        reject(422, issue("invalid_xlsx", "Не удалось открыть файл Excel."))
+    except ExcelParseError as error:
+        reject(422, issue("invalid_xlsx", str(error)))
+    diagnoses = application_diagnoses(parsed)
+    if len(parsed.items) > MAX_ITEMS or len(diagnoses) > MAX_DIAGNOSES:
+        reject(413, issue("application_too_large",
+                          f"Допустимо до {MAX_ITEMS} покупок и {MAX_DIAGNOSES} диагнозов."))
+    report = validate_parse_result(parsed, request_diagnoses=diagnoses, demo=True)
+    if not report.is_valid:
+        reject(422, *(i.model_dump(mode="json") for i in report.issues))
+    validate_amounts(parsed, report)
+    try:
+        factory = sessions()
+        with factory.begin() as session:
+            application_id, run_id, jobs, bundle = save_and_analyze(session, filename, parsed, diagnoses, report)
+    except (SQLAlchemyError, AnalysisError, ValueError, OSError) as error:
+        logger.warning("Анализ не завершён (%s).", type(error).__name__)
+        reject(503, issue("analysis_unavailable", "Анализ недоступен. Проверьте БД и справочник демо."))
+    if run_id is None:
+        raise HTTPException(status_code=503, detail={
+            'application_id': str(application_id),
+            'issues': [issue('analysis_unavailable', 'Анализ недоступен. Проверьте справочник демо.')],
+        })
+    if mode == "gigachat":
+        try:
+            enrich_saved_application(factory, application_id, run_id, jobs, bundle)
+        except SQLAlchemyError:
+            logger.warning("Обогащение результата не записано, локальная проверка сохранена.")
+    return read_application(application_id)
+
+
+@router.get("/applications/{application_id}", response_model=ApplicationResult)
+def get_application(application_id: UUID):
+    return read_application(application_id)
+
+
+@router.get("/applications/{application_id}/result.xlsx")
+def result_xlsx(application_id: UUID):
+    return Response(build_xlsx(read_application(application_id)), media_type=XLSX,
+                    headers={"Content-Disposition": 'attachment; filename="result.xlsx"'})
+
+
+@router.get("/applications/{application_id}/report.html")
+def report_html(application_id: UUID):
+    return Response(build_html(read_application(application_id)), media_type="text/html",
+                    headers={"Content-Disposition": 'attachment; filename="report.html"',
+                             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})

@@ -70,6 +70,9 @@ def _parse_issue_to_validation(issue: ParseIssue) -> ValidationIssue | None:
         else:
             message = "Не удалось распознать число в указанном столбце."
         code = IssueCode.INVALID_NUMBER
+    elif parse_code == "REPEATED_HEADER":
+        message = issue.message
+        code = IssueCode.PARSE_ISSUE
     elif parse_code == "DUPLICATE_COLUMN":
         message = "В файле обнаружен повторяющийся столбец."
         code = IssueCode.PARSE_ISSUE
@@ -127,7 +130,7 @@ def _duplicate_items(items: list[ParsedItem]) -> list[int]:
 
 
 def validate_parse_result(
-    parse_result: ParseResult, request_diagnoses: list[str] | None = None
+    parse_result: ParseResult, request_diagnoses: list[str] | None = None, *, demo: bool = False
 ) -> ValidationReport:
     """Проверить результат парсера без изменения исходных значений.
 
@@ -163,7 +166,8 @@ def validate_parse_result(
         for diagnosis in (request_diagnoses or [])
         if _has_value(diagnosis)
     }
-    if not file_diagnoses and not external_diagnoses:
+    diagnoses = external_diagnoses if demo else file_diagnoses | external_diagnoses
+    if not diagnoses:
         issues.append(
             _issue(
                 IssueLevel.CRITICAL,
@@ -212,7 +216,6 @@ def validate_parse_result(
                 )
             )
 
-    diagnoses = file_diagnoses | external_diagnoses
     if len(diagnoses) > 1:
         issues.append(
             _issue(

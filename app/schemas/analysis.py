@@ -54,6 +54,7 @@ class ReferenceSnapshot(BaseModel):
     drugs: list[ReferenceDrug] = Field(default_factory=list)
     rules: list[ReferenceRule] = Field(default_factory=list)
     reference_version: str
+    fingerprint: str | None = None
 
 
 class DrugMatch(BaseModel):

@@ -25,7 +25,9 @@ def best_category(checks: Iterable[Any]) -> DrugCategory | None:
     return None
 
 
-def category_shares(items_with_best_category: Iterable[Any]) -> dict[str, float]:
+def category_shares(
+    items_with_best_category: Iterable[Any], *, exact: bool = False,
+) -> dict[str, float | Decimal]:
     """Посчитать суммы и процентные доли; суммы доступны в ключах ``*_amount``."""
     amounts: dict[str, Decimal] = {category.value: Decimal("0") for category in _ORDER}
     amounts["undetermined"] = Decimal("0")
@@ -37,7 +39,7 @@ def category_shares(items_with_best_category: Iterable[Any]) -> dict[str, float]
             amount_decimal = Decimal(str(amount))
         except Exception:
             continue
-        if amount_decimal <= 0:
+        if not amount_decimal.is_finite() or amount_decimal <= 0:
             continue
         category = _value(item, "best_category", _value(item, "category"))
         key = (
@@ -51,12 +53,13 @@ def category_shares(items_with_best_category: Iterable[Any]) -> dict[str, float]
             key = "undetermined"
         amounts[key] += amount_decimal
     total = sum(amounts.values(), Decimal("0"))
+    convert = Decimal if exact else float
     result = {
-        key: float((value / total * 100) if total else Decimal("0"))
+        key: convert((value / total * 100) if total else Decimal("0"))
         for key, value in amounts.items()
     }
-    result.update({f"{key}_amount": float(value) for key, value in amounts.items()})
-    result["total_amount"] = float(total)
+    result.update({f"{key}_amount": convert(value) for key, value in amounts.items()})
+    result["total_amount"] = convert(total)
     return result
 
 
@@ -65,7 +68,21 @@ class TrafficLightDecision(NamedTuple):
     reason: str
 
 
-def compute_traffic_light(shares: Mapping[str, float], has_review: bool) -> TrafficLightDecision:
+def compute_traffic_light(
+    shares: Mapping[str, float | Decimal], has_review: bool, *,
+    demo: bool = False, incomplete: bool = False,
+) -> TrafficLightDecision:
+    if demo:
+        if incomplete or shares.get("total_amount", 0) <= 0 or shares.get("undetermined", 0) > 0:
+            return TrafficLightDecision(TrafficLight.UNDETERMINED,
+                                        "Есть нерешённые пары или суммы, требующие сверки.")
+        if shares.get("V", 0) > 50:
+            return TrafficLightDecision(TrafficLight.RED, "Доля категории В выше 50%.")
+        if shares.get("A", 0) > 80:
+            return TrafficLightDecision(TrafficLight.GREEN, "Доля категории А выше 80%.")
+        if shares.get("B", 0) >= 20:
+            return TrafficLightDecision(TrafficLight.YELLOW, "Доля категории Б не ниже 20%.")
+        return TrafficLightDecision(TrafficLight.UNDETERMINED, "Ни один порог демо не достигнут.")
     settings = get_traffic_light_settings()
     a_share = float(shares.get("A", 0))
     unknown_share = float(shares.get("undetermined", 0))

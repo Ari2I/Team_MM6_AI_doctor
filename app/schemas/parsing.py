@@ -16,6 +16,10 @@ class ParsedItem(BaseModel):
     diagnosis: str | None = None
 
 
+class ParsedDemoItem(ParsedItem):
+    original_cells: dict[str, str | None] = Field(default_factory=dict)
+
+
 class ParseIssue(BaseModel):
     """Проблема разбора без содержимого ячеек; column — каноническое поле."""
 

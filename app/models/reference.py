@@ -16,6 +16,7 @@ class ReferenceVersion(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     version: Mapped[str] = mapped_column(Text, unique=True)
+    fingerprint: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     drugs: Mapped[list[ReferenceDrug]] = relationship(
         back_populates="version", cascade="all, delete-orphan"

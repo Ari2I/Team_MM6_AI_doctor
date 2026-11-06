@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "request_id": "DEMO-2026-001",
+  "diagnosis": "Демо-диагноз",
+  "is_demo": true,
+  "context": {},
+  "items": [
+    {
+      "item_id": "row-1", "original": {"trade_name": "Демо-А", "dosage": "10 демо-ед.", "quantity": 2, "amount": "125.50", "currency": "RUB"},
+      "inn": "демо-вещество-а", "category": "А", "classification_reason": "Основная терапия в тестовом перечне.",
+      "dosage_check": {"status": "VALID", "reason": "Соответствует тестовому правилу.", "missing_data": []},
+      "source_refs": ["master-demo", "dosage-demo"], "upstream_status": "PROCESSED", "missing_data": []
+    },
+    {
+      "item_id": "row-2", "original": {"trade_name": "Демо-Б", "dosage": "демо-строка", "quantity": 3, "amount": "74.50", "currency": "RUB"},
+      "inn": "демо-вещество-б", "category": "Б", "classification_reason": "Сопутствующая терапия в тестовом перечне.",
+      "dosage_check": {"status": "NOT_CHECKED", "reason": null, "missing_data": []},
+      "source_refs": ["master-demo"], "upstream_status": "PROCESSED", "missing_data": []
+    },
+    {
+      "item_id": "row-3", "original": {"trade_name": "Демо-В", "dosage": "демо-строка", "quantity": 4, "amount": "50.00", "currency": "RUB"},
+      "inn": "демо-вещество-в", "category": "В", "classification_reason": "Категория В в тестовом перечне.",
+      "dosage_check": {"status": "NOT_CHECKED", "reason": null, "missing_data": []},
+      "source_refs": [], "upstream_status": "PROCESSED", "missing_data": []
+    },
+    {
+      "item_id": "row-4", "original": {"trade_name": "Неизвестный демо-препарат", "dosage": "неизвестно", "quantity": 1, "amount": "40.00", "currency": "RUB"},
+      "inn": null, "category": null, "classification_reason": null,
+      "dosage_check": {"status": "NOT_CHECKED", "reason": null, "missing_data": []},
+      "source_refs": [], "upstream_status": "PARTIAL", "missing_data": ["inn"]
+    },
+    {
+      "item_id": "row-5", "original": {"trade_name": "Нет основания", "dosage": "демо-строка", "quantity": 1, "amount": "30.00", "currency": "RUB"},
+      "inn": "демо-вне-корпуса", "category": "А", "classification_reason": "Обоснование отсутствует в тестовом корпусе.",
+      "dosage_check": {"status": "NOT_CHECKED", "reason": null, "missing_data": []},
+      "source_refs": [], "upstream_status": "PROCESSED", "missing_data": []
+    },
+    {
+      "item_id": "row-6", "original": {"trade_name": "Условный демо-препарат", "dosage": "демо-строка", "quantity": 1, "amount": "20.00", "currency": "RUB"},
+      "inn": "демо-условное", "category": "Б", "classification_reason": "Условная сопутствующая терапия.",
+      "dosage_check": {"status": "NOT_CHECKED", "reason": null, "missing_data": []},
+      "source_refs": ["protocol-demo"], "upstream_status": "PROCESSED", "missing_data": []
+    },
+    {
+      "item_id": "row-7", "original": {"trade_name": "Конфликт демо-категории", "dosage": "10 демо-ед.", "quantity": 1, "amount": "10.00", "currency": "RUB"},
+      "inn": "демо-вещество-а", "category": "Б", "classification_reason": "Основная терапия в тестовом перечне.",
+      "dosage_check": {"status": "NOT_CHECKED", "reason": null, "missing_data": []},
+      "source_refs": ["master-demo"], "upstream_status": "PROCESSED", "missing_data": []
+    },
+    {
+      "item_id": "row-8", "original": {"trade_name": "Недостаточная проверка", "dosage": "10 демо-ед.", "quantity": 1, "amount": "5.00", "currency": "RUB"},
+      "inn": "демо-вещество-а", "category": "А", "classification_reason": "Основная терапия в тестовом перечне.",
+      "dosage_check": {"status": "INSUFFICIENT_DATA", "reason": "Не хватает тестового параметра.", "missing_data": ["тестовый параметр"]},
+      "source_refs": ["master-demo"], "upstream_status": "PARTIAL", "missing_data": ["тестовый параметр"]
+    }
+  ]
+}

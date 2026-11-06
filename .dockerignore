@@ -12,3 +12,8 @@ build
 dist
 *.xlsx
 *.xls
+
+.local
+**/node_modules
+!tests/backend/data/*.xlsx
+!examples/demo.xlsx

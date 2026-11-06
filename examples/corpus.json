@@ -1,0 +1,56 @@
+{
+  "corpus_version": "demo-2026-10-18.1",
+  "is_demo": true,
+  "sources": [
+    {"source_id": "master-demo", "title": "Синтетический Master List — не медицинский источник", "source_type": "MASTER_LIST", "version": "demo-1", "is_demo": true},
+    {"source_id": "protocol-demo", "title": "Синтетический протокол — не медицинский источник", "source_type": "PROTOCOL", "version": "demo-1", "is_demo": true},
+    {"source_id": "dosage-demo", "title": "Синтетические правила дозировок — не медицинский источник", "source_type": "DOSAGE", "version": "demo-1", "is_demo": true}
+  ],
+  "fragments": [
+    {
+      "fragment_id": "master-a", "source_id": "master-demo", "location": "запись DEMO-A",
+      "inn": "демо-вещество-а", "diagnosis": "Демо-диагноз", "required_context": {},
+      "text": "ДЕМО. Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия.",
+      "assertions": [{"claim_id": "category-a", "kind": "CATEGORY", "category": "А", "dosage_status": null, "dosage": null,
+        "upstream_reason": "Основная терапия в тестовом перечне.",
+        "text": "Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия.",
+        "quote": "Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия."}]
+    },
+    {
+      "fragment_id": "master-b", "source_id": "master-demo", "location": "запись DEMO-B",
+      "inn": "демо-вещество-б", "diagnosis": "Демо-диагноз", "required_context": {},
+      "text": "ДЕМО. Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия.",
+      "assertions": [{"claim_id": "category-b", "kind": "CATEGORY", "category": "Б", "dosage_status": null, "dosage": null,
+        "upstream_reason": "Сопутствующая терапия в тестовом перечне.",
+        "text": "Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия.",
+        "quote": "Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия."}]
+    },
+    {
+      "fragment_id": "master-c", "source_id": "master-demo", "location": "запись DEMO-C",
+      "inn": "демо-вещество-в", "diagnosis": "Демо-диагноз", "required_context": {},
+      "text": "ДЕМО. Демо-вещество-в при демо-диагнозе отнесено в тестовом перечне к категории В.",
+      "assertions": [{"claim_id": "category-c", "kind": "CATEGORY", "category": "В", "dosage_status": null, "dosage": null,
+        "upstream_reason": "Категория В в тестовом перечне.",
+        "text": "Демо-вещество-в при демо-диагнозе отнесено в тестовом перечне к категории В.",
+        "quote": "Демо-вещество-в при демо-диагнозе отнесено в тестовом перечне к категории В."}]
+    },
+    {
+      "fragment_id": "protocol-conditional", "source_id": "protocol-demo", "location": "раздел DEMO-CONDITION",
+      "inn": "демо-условное", "diagnosis": "Демо-диагноз", "required_context": {"demo_marker": "present"},
+      "text": "ДЕМО. Только при явно указанном demo_marker=present демо-условное при демо-диагнозе относится к категории Б.",
+      "assertions": [{"claim_id": "conditional-b", "kind": "CATEGORY", "category": "Б", "dosage_status": null, "dosage": null,
+        "upstream_reason": "Условная сопутствующая терапия.",
+        "text": "Только при явно указанном demo_marker=present демо-условное при демо-диагнозе относится к категории Б.",
+        "quote": "Только при явно указанном demo_marker=present демо-условное при демо-диагнозе относится к категории Б."}]
+    },
+    {
+      "fragment_id": "dose-a", "source_id": "dosage-demo", "location": "запись DEMO-DOSE-A",
+      "inn": "демо-вещество-а", "diagnosis": "Демо-диагноз", "required_context": {},
+      "text": "ДЕМО. В синтетическом сценарии демо-вещества-а при демо-диагнозе результат проверки строки «10 демо-ед.» — VALID.",
+      "assertions": [{"claim_id": "dosage-a", "kind": "DOSAGE", "category": null, "dosage_status": "VALID", "dosage": "10 демо-ед.",
+        "upstream_reason": "Соответствует тестовому правилу.",
+        "text": "В синтетическом сценарии демо-вещества-а при демо-диагнозе результат проверки строки «10 демо-ед.» — VALID.",
+        "quote": "В синтетическом сценарии демо-вещества-а при демо-диагнозе результат проверки строки «10 демо-ед.» — VALID."}]
+    }
+  ]
+}

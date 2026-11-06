@@ -20,6 +20,7 @@ class Application(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     filename: Mapped[str] = mapped_column(Text)
+    demo_meta: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[ApplicationStatus] = mapped_column(
         Enum(
             ApplicationStatus,
@@ -79,6 +80,7 @@ class ApplicationItem(Base):
         ForeignKey("applications.id", ondelete="CASCADE"), index=True
     )
     row_number: Mapped[int]
+    original_cells: Mapped[dict | None] = mapped_column(JSONB)
     # Пустые/неразобранные ячейки допустимы: валидатор возвращает предупреждения.
     drug_name: Mapped[str | None] = mapped_column(Text)
     diagnosis: Mapped[str | None] = mapped_column(Text)
@@ -119,6 +121,7 @@ class ItemCheck(Base):
         comment="A / B / V — категории А / Б / В; NULL означает, что категория не определена.",
     )
     source: Mapped[str | None] = mapped_column(Text)
+    evidence: Mapped[dict | None] = mapped_column(JSONB)
     reference_version: Mapped[str | None] = mapped_column(Text)
     comment: Mapped[str | None] = mapped_column(Text)
     needs_review: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
