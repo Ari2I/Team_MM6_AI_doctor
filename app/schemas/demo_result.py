@@ -65,6 +65,52 @@ class OfficialDrug(BaseModel):
     compositions: list[OfficialComposition]
 
 
+class ML2Citation(BaseModel):
+    source_id: str
+    fragment_id: str
+    title: str
+    version: str
+    url: str
+    location: str
+    quote: str
+    copy_url: str | None = None
+
+
+class ML2CatalogCandidate(BaseModel):
+    title: str
+    edition_id: str
+    population: str
+    page_url: str
+
+
+class ML2DosageCheck(BaseModel):
+    status: Literal["MATCHES", "DEVIATION", "INSUFFICIENT_DATA", "NOT_CHECKED"]
+    reason: str
+    missing_data: list[str] = Field(default_factory=list)
+
+
+class ML2Classification(BaseModel):
+    status: Literal[
+        "PROPOSED", "NEEDS_REVIEW", "NEEDS_CONTEXT", "NO_EVIDENCE",
+        "INN_UNRESOLVED", "MULTI_INGREDIENT_REVIEW", "CONFLICT",
+        "INVALID_RESPONSE", "PROVIDER_ERROR", "SOURCE_ERROR",
+    ]
+    assessment: Literal[
+        "CORE_TREATMENT", "SUPPORTIVE_TREATMENT", "EXPLICITLY_NOT_RECOMMENDED",
+        "MENTIONED_ONLY", "NOT_FOUND", "INSUFFICIENT_CONTEXT", "CONFLICTING_EVIDENCE",
+    ] | None
+    proposed_category: Category | None
+    reason: str | None = None
+    conditions: list[str] = Field(default_factory=list)
+    missing_context: list[str] = Field(default_factory=list)
+    citations: list[ML2Citation] = Field(default_factory=list)
+    registry_citations: list[ML2Citation] = Field(default_factory=list)
+    candidates: list[ML2CatalogCandidate] = Field(default_factory=list)
+    dosage_check: ML2DosageCheck | None = None
+    recommendation: dict | None = None
+    approved_rule_preserved: bool | None = None
+
+
 class CheckResult(BaseModel):
     item_id: UUID
     diagnosis_id: UUID
@@ -84,11 +130,11 @@ class CheckResult(BaseModel):
     rule_ids: list[str] = Field(default_factory=list)
     model_highlight: SourceCitation | None = None
     model_review_action: str | None = None
+    ml2_classification: ML2Classification | None = None
     relationship_found: bool = False
     effective_mode: Mode
     retrieval: Literal["lexical", "vector"]
     fallback_reason: str | None = None
-
 
 class DiagnosisSummary(BaseModel):
     diagnosis_id: UUID
@@ -120,6 +166,10 @@ class ApplicationResult(BaseModel):
     model_review_priorities: list[str] = Field(default_factory=list)
     model_attempted: bool = False
     model_tokens: int | None = None
+    ml2_attempted: bool = False
+    ml2_pairs: int = 0
+    ml2_status_counts: dict[str, int] = Field(default_factory=dict)
+    ml2_model_tokens: int | None = None
     approved_rule_count: int | None = None
     reference_version: str
     corpus_version: str

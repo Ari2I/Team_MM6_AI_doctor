@@ -38,6 +38,20 @@ export type Check = {
   rule_ids: string[]
   model_highlight: Citation | null
   model_review_action: string | null
+  ml2_classification: {
+    status: string
+    assessment: string | null
+    proposed_category: Category | null
+    reason: string | null
+    conditions: string[]
+    missing_context: string[]
+    citations: Citation[]
+    dosage_check: {
+      status: 'MATCHES' | 'DEVIATION' | 'INSUFFICIENT_DATA' | 'NOT_CHECKED'
+      reason: string
+      missing_data: string[]
+    } | null
+  } | null
   effective_mode: Mode
   retrieval: 'lexical' | 'vector'
   fallback_reason: string | null

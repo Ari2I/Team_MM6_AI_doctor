@@ -141,6 +141,10 @@ class GigaChatProvider:
         )
         return self._request_json({"rows": rows}, instructions, schema)
 
+    def complete_json(self, context: dict, instructions: str, schema: dict) -> dict:
+        """Выполнить вызов со строгой JSON-схемой для изолированных адаптеров проекта."""
+        return self._request_json(context, instructions, schema)
+
     def _request_json(self, context: dict, instructions: str, schema: dict) -> dict:
         self.last_total_tokens = None
         try:

@@ -27,7 +27,7 @@ RECOMMENDATION = (
 DEMO_NOTICE = "Категории А/Б/В и пороги индикатора — демонстрационные правила. Решение о выплате принимает комиссия."
 OFFICIAL_NOTICE = "Официальные источники приведены для сверки. Категории определяются правилами комиссии."
 MONEY_FORMAT = "#,##0.00"
-CHECK_WIDTHS = [9, 24, 22, 29, 14, 13, 49, 34, 31, 15]
+CHECK_WIDTHS = [9, 24, 22, 29, 14, 13, 49, 34, 31, 15, 42, 38]
 
 
 def safe_https(url: str | None) -> str | None:
@@ -113,7 +113,8 @@ def _official_report_header(sheet, result):
     _append(sheet, ["Строка", "Препарат", "МНН", "Диагноз блока", "Сумма, ₽", "Категория", "Основание",
                     "Шаг сверки GigaChat", "Документ и его роль", "Копия",
                     "Код причины", "Ручная проверка", "Фрагмент", "Режим", "Поиск", "Резерв",
-                    "Условия из источника", "Правила", "Фрагмент по выбору GigaChat"])
+                    "Условия из источника", "Правила", "Фрагмент по выбору GigaChat",
+                    "Предварительная классификация ML-2", "Проверка дозировки ML-2"])
     sheet.row_dimensions[sheet.max_row].height = 30
     return sheet.max_row
 
@@ -124,9 +125,23 @@ def _official_report_check(sheet, row, item, diagnosis, status, references, deta
     explanation = row.explanation if status == row.explanation else f"{status}\n{row.explanation}"
     copy_url = safe_https(citation.copy_url) if citation else None
     amount = item.amount if item.amount is not None else "Не учтена"
+    ml2 = row.ml2_classification
+    ml2_text = None
+    if ml2:
+        label = (
+            f"{ml2.assessment or ml2.status} · категория "
+            f"{ml2.proposed_category or 'не определена'}"
+        )
+        ml2_text = f"{label}\n{ml2.reason or ''}".strip()
+    dosage_check = ml2.dosage_check if ml2 else None
+    dosage_text = None
+    if dosage_check:
+        dosage_text = f"{dosage_check.status}\n{dosage_check.reason}"
+        if dosage_check.missing_data:
+            dosage_text += "\nНе хватает: " + ", ".join(dosage_check.missing_data)
     _append(sheet, [item.row_number, item.drug_name, item.mnn, diagnosis, amount,
                     row.category or "На сверке", explanation, row.model_review_action, document,
-                    "Открыть копию" if copy_url else None, *details])
+                    "Открыть копию" if copy_url else None, *details, ml2_text, dosage_text])
     number = sheet.max_row
     sheet.cell(number, 5).number_format = MONEY_FORMAT
     if citation:
@@ -262,7 +277,8 @@ def build_html(result: ApplicationResult) -> str:
         copy_url = safe_https(row.copy_url)
         copy = f' · <a href="{e(copy_url)}">Опубликованная копия</a> для сверки' if copy_url else ""
         return (f"<li><blockquote>{e(row.quote)}</blockquote>{title} · {e(row.version)} · "
-                f"{e(row.location)} · {e(row.fragment_id)} · получено {e(row.retrieved_at)}{copy}</li>")
+                f"{e(row.location)} · {e(row.fragment_id)} · получено "
+                f"{e(getattr(row, 'retrieved_at', None))}{copy}</li>")
 
     names = {diag.diagnosis_id: f"{diag.name} · строка {diag.source_row}" if diag.source_row else diag.name
              for diag in result.diagnoses}
@@ -293,6 +309,32 @@ def build_html(result: ApplicationResult) -> str:
                 source_list += f"<p>Фрагмент, выделенный GigaChat</p><ul>{cite(check.model_highlight)}</ul>"
             if check.model_review_action:
                 source_list += f"<p>Шаг сверки по выбору GigaChat. {e(check.model_review_action)}</p>"
+            if check.ml2_classification:
+                ml2 = check.ml2_classification
+                category = ml2.proposed_category or "не определена"
+                source_list += (
+                    f"<p><strong>Предварительная оценка ML-2:</strong> "
+                    f"{e(ml2.assessment or ml2.status)} · категория {e(category)}. {e(ml2.reason)}</p>"
+                )
+                if ml2.conditions:
+                    source_list += "<p>Условия: " + "<br>".join(e(value) for value in ml2.conditions) + "</p>"
+                if ml2.missing_context:
+                    source_list += "<p>Недостающий контекст: " + "<br>".join(
+                        e(value) for value in ml2.missing_context
+                    ) + "</p>"
+                if ml2.dosage_check:
+                    dosage = ml2.dosage_check
+                    source_list += (
+                        f"<p><strong>Проверка дозировки:</strong> {e(dosage.status)}. "
+                        f"{e(dosage.reason)}</p>"
+                    )
+                    if dosage.missing_data:
+                        source_list += "<p>Не хватает данных: " + ", ".join(
+                            e(value) for value in dosage.missing_data
+                        ) + "</p>"
+                ml2_citations = "".join(cite(citation) for citation in ml2.citations)
+                if ml2_citations:
+                    source_list += f"<p>Цитаты для предварительной оценки ML-2</p><ul>{ml2_citations}</ul>"
             if check.rule_ids:
                 source_list += f"<p>Правила {e(', '.join(check.rule_ids))}</p>"
             rows.append(f"<tr><td>{item.row_number}</td><td>{e(item.drug_name)}<br>{e(item.mnn)}</td>"

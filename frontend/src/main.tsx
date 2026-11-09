@@ -17,6 +17,12 @@ const evidence: Record<Check['evidence_status'], string> = {
   UNCONFIRMED: 'Не подтверждено', SOURCE_CONFLICT: 'Конфликт источников',
   PROCESSING_ERROR: 'Ошибка проверки',
 }
+const ml2Assessments: Record<string, string> = {
+  CORE_TREATMENT: 'Основное лечение', SUPPORTIVE_TREATMENT: 'Поддерживающее лечение',
+  EXPLICITLY_NOT_RECOMMENDED: 'Прямо не рекомендовано', MENTIONED_ONLY: 'Только упомянуто',
+  NOT_FOUND: 'Не найдено во фрагментах', INSUFFICIENT_CONTEXT: 'Недостаточно контекста',
+  CONFLICTING_EVIDENCE: 'Противоречивые сведения',
+}
 const fallbackLabels: Record<string, string> = {
   GIGACHAT_CONFIGURATION: 'Проверьте настройки GigaChat и доверенного сертификата.',
   GIGACHAT_BUDGET_EXCEEDED: 'Превышен лимит времени GigaChat.',
@@ -100,6 +106,20 @@ function PurchaseRow({ check, item }: { check: Check; item: Purchase }) {
     <td>
       <div className="evidence">{officialStatuses[check.reason_code] || evidence[check.evidence_status]}</div>
       <p>{check.explanation}</p>
+      {check.ml2_classification && <details className="ml2-result">
+        <summary>Предварительная оценка ML-2 · {ml2Assessments[check.ml2_classification.assessment || ''] || check.ml2_classification.status}
+          {check.ml2_classification.proposed_category
+            ? ' · категория ' + check.ml2_classification.proposed_category : ' · категория не определена'}</summary>
+        {check.ml2_classification.reason && <p>{check.ml2_classification.reason}</p>}
+        {check.ml2_classification.conditions.length > 0 && <p>Условия: {check.ml2_classification.conditions.join('; ')}</p>}
+        {check.ml2_classification.missing_context.length > 0 &&
+          <p>Нужно уточнить: {check.ml2_classification.missing_context.join('; ')}</p>}
+        {check.ml2_classification.dosage_check && <p><strong>Дозировка · {check.ml2_classification.dosage_check.status}.</strong>{' '}
+          {check.ml2_classification.dosage_check.reason}
+          {check.ml2_classification.dosage_check.missing_data.length > 0 &&
+            ' Не хватает: ' + check.ml2_classification.dosage_check.missing_data.join(', ')}</p>}
+        {check.ml2_classification.citations.map(citation => <Source key={citation.fragment_id + citation.quote} citation={citation}/>) }
+      </details>}
       {check.evidence_conditions.length > 0 && <ul className="issues">
         {check.evidence_conditions.map(condition => <li key={condition}>{condition}</li>)}
       </ul>}
@@ -301,6 +321,7 @@ function App() {
     const form = new FormData()
     form.set('file', file)
     form.set('reference', 'official')
+    form.set('mode', 'gigachat')
     if (sheet) form.set('sheet', sheet)
     if (Object.keys(columns).length) form.set('columns', JSON.stringify(columns))
     setResult(null)
@@ -342,6 +363,7 @@ function App() {
           </label>)}
           <button className="button primary" type="submit" disabled={!file || busy}>{busy ? 'Обработка…' : 'Проверить заявку'}</button>
         </div>
+        <p className="hint">Сверка лекарств с клиническими рекомендациями выполняется через GigaChat. Загрузите только синтетические данные для демонстрации.</p>
         {layout && <p className="hint">В книге несколько подходящих вариантов. Выберите данные заявки.</p>}
       </form>
       {busy && <p role="status" className="notice">Проверка выполняется…</p>}

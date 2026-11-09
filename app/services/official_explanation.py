@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import os
+from pathlib import Path
 from threading import BoundedSemaphore, Event
 from time import monotonic
 
@@ -85,7 +86,7 @@ def verify_selection(response: dict, rows: dict[int, list[dict]]) -> tuple[dict,
 
 def gigachat_settings() -> dict[str, str | None]:
     names = ("GIGACHAT_CREDENTIALS", "GIGACHAT_ACCESS_TOKEN", "GIGACHAT_MODEL", "GIGACHAT_CA_BUNDLE")
-    path = os.getenv("GIGACHAT_ENV_FILE")
+    path = os.getenv("GIGACHAT_ENV_FILE") or str(Path(__file__).resolve().parents[2] / ".env")
     try:
         configured = dotenv_values(path) if path else {}
     except (OSError, UnicodeError):
@@ -165,7 +166,11 @@ def _select(rows: dict[int, list[dict]]) -> tuple[dict, list[int], str | None, b
         return {}, [], "GIGACHAT_PROVIDER_ERROR", attempted.is_set(), sum(reported_tokens) if reported_tokens else None
 
 
-def enrich_official(sessions, application_id, run_id: str) -> None:
+def enrich_official(sessions, application_id, run_id: str, index=None, *, enable_ml2: bool = False) -> None:
+    ml2_summary = {"attempted": False, "reason": "OFFICIAL_INDEX_UNAVAILABLE", "pairs": 0}
+    if index is not None and enable_ml2:
+        from app.services.ml2_pipeline import classify_official_application
+        ml2_summary = classify_official_application(sessions, application_id, run_id, index)
     query = (select(ItemCheck).join(ApplicationItem).where(ApplicationItem.application_id == application_id)
              .order_by(ApplicationItem.row_number, ItemCheck.id))
     with sessions() as session:
@@ -175,7 +180,19 @@ def enrich_official(sessions, application_id, run_id: str) -> None:
     action_groups = {}
     for check in checks:
         evidence = check.evidence
-        sources = evidence.get("citations") or evidence.get("review_sources") or []
+        sources = list(evidence.get("citations") or evidence.get("review_sources") or [])
+        ml2 = evidence.get("ml2_classification") or {}
+        sources.extend(ml2.get("citations") or [])
+        # Keep the report's choices bounded and do not let duplicate evidence crowd out
+        # the source fragment that the deterministic official rule already selected.
+        unique_sources = []
+        seen_sources = set()
+        for source in sources:
+            key = (source.get("fragment_id"), source.get("quote"))
+            if key not in seen_sources:
+                seen_sources.add(key)
+                unique_sources.append(source)
+        sources = unique_sources
         if sources and evidence["evidence_status"] != "SOURCE_CONFLICT":
             ordinal = len(rows) + 1
             rows[ordinal] = [{"citation": source} for source in sources[:4]]
@@ -207,10 +224,19 @@ def enrich_official(sessions, application_id, run_id: str) -> None:
             for check_id in check_ids:
                 check = saved[check_id]
                 check.evidence = check.evidence | update
-        mode = "mixed" if selected and reason else "gigachat" if selected else "offline"
+        ml2_success = ml2_summary.get("successful", 0) > 0
+        selection_success = bool(selected)
+        mode = ("mixed" if ml2_success and selection_success else "gigachat"
+                if ml2_success or selection_success else "offline")
+        model_token_total = (tokens or 0) + (ml2_summary.get("tokens") or 0)
         summary = [selected[row] for row in summary_rows[:6]]
         application.demo_meta = application.demo_meta | {
-            "model_attempted": attempted, "model_tokens": tokens, "effective_mode": mode, "fallback_reason": reason,
+            "model_attempted": attempted or ml2_summary.get("attempted", False),
+            "model_tokens": model_token_total or None, "effective_mode": mode,
+            "fallback_reason": reason,
+            "ml2_attempted": ml2_summary.get("attempted", False),
+            "ml2_pairs": ml2_summary.get("pairs", 0),
+            "ml2_model_tokens": ml2_summary.get("tokens"),
             "model_summary": [option["citation"] for option in summary if "citation" in option],
             "model_review_priorities": list(dict.fromkeys(
                 option["action"] for option in summary if "action" in option

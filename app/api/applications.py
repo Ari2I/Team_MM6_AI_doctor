@@ -189,7 +189,7 @@ def create_application(
     if (use_official and mode != "offline") or mode == "gigachat":
         try:
             if use_official:
-                enrich_official(factory, application_id, run_id)
+                enrich_official(factory, application_id, run_id, official, enable_ml2=mode == "gigachat")
             else:
                 enrich_saved_application(factory, application_id, run_id, jobs, bundle)
         except SQLAlchemyError:
