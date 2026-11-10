@@ -21,6 +21,7 @@ class Assessment(StrEnum):
     CORE_TREATMENT = "CORE_TREATMENT"
     SUPPORTIVE_TREATMENT = "SUPPORTIVE_TREATMENT"
     EXPLICITLY_NOT_RECOMMENDED = "EXPLICITLY_NOT_RECOMMENDED"
+    OPTIONAL_PRODUCT = "OPTIONAL_PRODUCT"
     MENTIONED_ONLY = "MENTIONED_ONLY"
     NOT_FOUND = "NOT_FOUND"
     INSUFFICIENT_CONTEXT = "INSUFFICIENT_CONTEXT"
@@ -102,42 +103,33 @@ class InvalidModelResponse(ValueError):
 _PROVISIONAL_CATEGORY = {
     Assessment.CORE_TREATMENT: "А",
     Assessment.SUPPORTIVE_TREATMENT: "Б",
+    Assessment.OPTIONAL_PRODUCT: "В",
     Assessment.EXPLICITLY_NOT_RECOMMENDED: "В",
 }
 
 _SUPPORTIVE_ROLE_CUE = re.compile(
-    r"(?:симптоматическ\w*|сопутствующ\w*|поддерживающ\w*|"
-    r"для\s+(?:снятия|купирования|облегчения)\s+(?:симптом\w*|приступ\w*)|"
-    r"профилактик\w*.{0,100}осложнен\w*)",
-    re.IGNORECASE,
+    r"симптоматическ|сопутствующ.{0,25}терап|вспомогательн|"
+    r"(?:сняти|купировани|облегчени|уменьшени).{0,32}(?:симптом|приступ|бол[ие]|зуд)|"
+    r"(?:защит|профилактик).{0,45}(?:орган|поврежден|поражен|осложнен)", re.I,
 )
-_EXPLICIT_NOT_RECOMMENDED_CUE = re.compile(
-    r"(?:не\s+рекоменд\w*|не\s+показал\w*.{0,80}польз\w*|"
-    r"отсутств\w*.{0,80}польз\w*|неэффектив\w*|противопоказан\w*)",
-    re.IGNORECASE,
+_OPTIONAL_CUE = re.compile(
+    r"биологически активн.{0,12}добавк|\bБАД(?:ы|ов|ом)?\b|"
+    r"\bвитамин(?:ы|ом|а|ов)?\b|общеукрепляющ|"
+    r"(?:недоказанн|неподтвержденн).{0,20}эффективност|"
+    r"эффективность.{0,20}не (?:доказана|подтверждена)|нет доказательств эффективности",
+    re.I,
 )
 
-
-def _has_supportive_role_context(
-    inn: str, citations: list[Citation], fragments: Mapping[str, EvidenceFragment]
-) -> bool:
-    """Учитывать роль из ближайшего текста вокруг упомянутого МНН, не всего окна."""
-
-    tokens = [token for token in re.findall(r"[a-zа-яё0-9-]+", inn_key(inn)) if len(token) >= 4]
-    patterns = [
-        re.compile(r"(?<!\w)" + re.escape(token) + r"[а-яё]{0,4}(?!\w)", re.IGNORECASE)
-        for token in tokens
-    ]
-    for citation in citations:
-        fragment = fragments.get(citation.fragment_id)
-        if fragment is None:
+def _optional_evidence(inn: str, quote: str) -> bool:
+    """Require a statement about the resolved ingredient, in the same clause."""
+    ingredient = re.escape(inn_key(inn)).replace(r"\ ", r"\s+")
+    for clause in re.split(r"[.;!?\n]", quote.casefold().replace("ё", "е")):
+        if not re.search(r"(?<!\w)" + ingredient + r"[а-я]{0,3}(?!\w)", clause):
             continue
-        text = fragment.text.replace("ё", "е").replace("Ё", "Е")
-        for pattern in patterns:
-            for match in pattern.finditer(text):
-                start, end = max(0, match.start() - 1500), min(len(text), match.end() + 500)
-                if _SUPPORTIVE_ROLE_CUE.search(text[start:end]):
-                    return True
+        if re.search(r"не (?:является|относится)|дефицит\w* витамин|взаимодейств\w* с", clause):
+            continue
+        if _OPTIONAL_CUE.search(clause):
+            return True
     return False
 
 
@@ -283,15 +275,17 @@ SYSTEM_PROMPT = """Ты извлекаешь медицинские тезисы
 Не используй внешние знания и не додумывай сведения.
 
 Для заданных диагноза и МНН определи только то, что прямо подтверждается цитатой:
-- CORE_TREATMENT: рекомендация прямо описывает препарат как основное лечение
-  заболевания в применимых условиях. Для CORE_TREATMENT цитата должна показывать,
-  что препарат является базовой/первой линией или основным средством лечения.
-- SUPPORTIVE_TREATMENT: рекомендация прямо описывает симптоматическую,
-  сопутствующую терапию или профилактику осложнения. Снятие/купирование симптомов,
-  применение препарата «по потребности» для облегчения симптомов и вспомогательная
-  терапия относятся к SUPPORTIVE_TREATMENT, если текст не называет препарат основным.
-- EXPLICITLY_NOT_RECOMMENDED: текст прямо не рекомендует препарат или прямо
-  говорит об отсутствии пользы в данном контексте;
+- CORE_TREATMENT (А): для этой пары подтверждено включение в золотой стандарт
+  по базе жизненных показаний. Общее «рекомендуется» и «первая линия» сами по себе
+  не подтверждают принадлежность к этой базе.
+- SUPPORTIVE_TREATMENT (Б): вне золотого стандарта, но с доказанной клинической
+  практикой для облегчения симптомов или защиты органов. Цитируй рекомендацию
+  о применении именно этого средства с указанной целью.
+- OPTIONAL_PRODUCT (В): источник прямо идентифицирует данное средство как витамин,
+  БАД, общеукрепляющее средство либо указывает недоказанную эффективность.
+  Учитывай конкретное показание и приоритет подтверждённого правила.
+- EXPLICITLY_NOT_RECOMMENDED: запрет применения сам по себе не обосновывает В.
+  Если причина запрета не связана с недоказанной эффективностью, нужна сверка.
 - MENTIONED_ONLY: препарат лишь упомянут, роль неясна;
 - NOT_FOUND: подходящего упоминания нет;
 - INSUFFICIENT_CONTEXT: тезис зависит от условия, которого нет во входном контексте;
@@ -483,28 +477,22 @@ def validate_response(
     if assessment == Assessment.INSUFFICIENT_CONTEXT and not missing:
         raise InvalidModelResponse("Для недостатка контекста укажите недостающее условие.")
 
-    # Проверяем роль не только по метке модели, но и по исходному фрагменту.
-    # В частности, нельзя повышать явно симптоматическое применение до CORE.
-    cited_quotes = " ".join(row.quote for row in citations)
+    quotes = [citation.quote for citation in citations]
     assessment_note = None
-    if (
-        assessment == Assessment.CORE_TREATMENT
-        and _has_supportive_role_context(request.inn, citations, fragments)
-    ):
-        assessment = Assessment.SUPPORTIVE_TREATMENT
-        assessment_note = (
-            "В исходном фрагменте препарат указан для снятия симптомов/приступов; "
-            "по предварительной схеме ML‑2 это категория Б, а не основное лечение."
-        )
-    elif (
-        assessment == Assessment.EXPLICITLY_NOT_RECOMMENDED
-        and not _EXPLICIT_NOT_RECOMMENDED_CUE.search(cited_quotes)
-    ):
+    if assessment in _PROVISIONAL_CATEGORY and missing:
+        assessment = Assessment.INSUFFICIENT_CONTEXT
+    elif assessment == Assessment.CORE_TREATMENT and request.context.get("Подтверждённая категория по правилу") != "А":
         assessment = Assessment.MENTIONED_ONLY
-        assessment_note = (
-            "В цитате нет прямого тезиса «не рекомендовано» или эквивалентного "
-            "основания для категории В. Нужна ручная сверка."
-        )
+        assessment_note = "Для этой пары не подтверждено включение в золотой стандарт по базе жизненных показаний."
+    elif assessment == Assessment.SUPPORTIVE_TREATMENT and not any(_SUPPORTIVE_ROLE_CUE.search(q) for q in quotes):
+        assessment = Assessment.MENTIONED_ONLY
+        assessment_note = "В выбранных цитатах не подтверждена сопутствующая роль для облегчения симптомов или защиты органов."
+    elif assessment in {Assessment.EXPLICITLY_NOT_RECOMMENDED, Assessment.OPTIONAL_PRODUCT}:
+        if any(_optional_evidence(request.inn, q) for q in quotes):
+            assessment = Assessment.OPTIONAL_PRODUCT
+        else:
+            assessment = Assessment.MENTIONED_ONLY
+            assessment_note = "Цитаты не подтверждают признаки сомнительного или опционального средства по ТЗ."
 
     category = _PROVISIONAL_CATEGORY.get(assessment)
     if assessment_note:
@@ -526,17 +514,14 @@ def validate_response(
         status = ClassificationStatus.PROPOSED
         reason = (
             "КР описывает симптоматическую или сопутствующую терапию; "
-            "по предварительной схеме ML‑2 это категория Б."
+            "по критерию сопутствующей терапии в ТЗ предложена категория Б."
         )
-    elif assessment == Assessment.EXPLICITLY_NOT_RECOMMENDED:
+    elif assessment == Assessment.OPTIONAL_PRODUCT:
         status = ClassificationStatus.PROPOSED
-        reason = (
-            "В цитате есть прямое основание против применения; "
-            "по предварительной схеме ML‑2 это категория В."
-        )
+        reason = "Предварительная категория В по ТЗ: источник указывает тип средства или недоказанную эффективность."
     else:
         status = ClassificationStatus.PROPOSED
-        reason = "Категория предварительная и требует проверки по согласованному правилу."
+        reason = "Для пары применено подтверждённое правило категории А."
 
     if category is None:
         citations = [] if assessment == Assessment.NOT_FOUND else citations

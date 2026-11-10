@@ -65,7 +65,10 @@ def _citation_dict(citation) -> dict:
 def _result_dict(result: ClassificationResult, **extra) -> dict:
     return {
         "status": result.status.value,
-        "assessment": result.assessment.value if result.assessment else None,
+        # The shared API has no optional-product role. Carry В and its reason
+        # explicitly without labeling a vitamin as clinically contraindicated.
+        "assessment": (result.assessment.value if result.assessment
+                       and result.assessment.value != "OPTIONAL_PRODUCT" else None),
         "proposed_category": result.proposed_category,
         "reason": result.review_reason,
         "conditions": list(result.conditions),
@@ -164,7 +167,8 @@ def classify_official_application(
                     item.dosage,
                     diagnosis.name,
                     item.mnn,
-                    check.category is not None and not (check.evidence or {}).get("ml2_owns_category"),
+                    CATEGORIES.get(check.category) if (check.evidence or {}).get("evidence_status") == "SUPPORTED"
+                    and not (check.evidence or {}).get("ml2_owns_category") else None,
                 )
             )
 
@@ -179,7 +183,7 @@ def classify_official_application(
     model_calls = 0
     model_successes = 0
     for record in records:
-        check_id, item_id, trade_name, dosage, diagnosis, inn, has_rule = record
+        check_id, item_id, trade_name, dosage, diagnosis, inn, rule_category = record
         if not inn:
             prepared.append(
                 (
@@ -450,7 +454,7 @@ def classify_official_application(
                 )
             )
             continue
-        payload = (trade_name, dosage, diagnosis, code, item_id, fragments)
+        payload = (trade_name, dosage, diagnosis, code, item_id, fragments, rule_category)
         metadata = {
             "item_id": str(item_id),
             "diagnosis_code": code,
@@ -462,7 +466,7 @@ def classify_official_application(
                 "primary_url": recommendation.primary_url,
                 "population": recommendation.population,
             },
-            "approved_rule_preserved": has_rule,
+            "approved_rule_preserved": rule_category is not None,
         }
         prepared.append((check_id, payload, metadata))
 
@@ -522,7 +526,10 @@ def classify_official_application(
                             )
                         )
                         continue
-                    trade_name, dosage, diagnosis, code, item_id, fragments = payload
+                    trade_name, dosage, diagnosis, code, item_id, fragments, rule_category = payload
+                    clinical_context = {"Код МКБ-10": code}
+                    if rule_category:
+                        clinical_context["Подтверждённая категория по правилу"] = rule_category
                     model_calls += 1
                     result = classify_purchase(
                         index.snapshot,
@@ -532,7 +539,7 @@ def classify_official_application(
                         dosage=dosage,
                         diagnosis=diagnosis,
                         diagnosis_code=code,
-                        context={"Код МКБ-10": code},
+                        context=clinical_context,
                         complete_json=complete_json,
                         registry_snapshot=index.snapshot,
                         evidence_fragments=fragments,
