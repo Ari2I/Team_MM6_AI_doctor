@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "request_id": "synthetic-ml2-20261110",
+  "diagnosis": "J45.9",
+  "is_demo": true,
+  "context": {},
+  "items": [
+    {
+      "item_id": "synthetic-salbutamol",
+      "original": {
+        "trade_name": "Сальбутамол",
+        "dosage": "100 мкг/доза",
+        "quantity": 1,
+        "amount": "300.00",
+        "currency": "RUB"
+      },
+      "inn": null,
+      "category": null,
+      "classification_reason": null,
+      "dosage_check": {
+        "status": "NOT_CHECKED",
+        "reason": null,
+        "missing_data": []
+      },
+      "source_refs": [],
+      "upstream_status": "PARTIAL",
+      "missing_data": []
+    }
+  ]
+}

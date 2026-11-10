@@ -1,0 +1,104 @@
+{
+  "version": "synthetic-1",
+  "as_of": "2026-11-10",
+  "registrations": [
+    {
+      "registration": "SYNTHETIC-1",
+      "trade_name": "Демо-А",
+      "mnn": "демо-вещество-а",
+      "form": "",
+      "source": {
+        "title": "Синтетический реестр для проверки контракта, не данные ГРЛС",
+        "url": "https://grls.rosminzdrav.ru/GRLS.aspx",
+        "version": "synthetic-1",
+        "location": "Синтетическая строка 1",
+        "retrieved_at": "2026-11-10",
+        "quote": "Синтетическое сопоставление: демо-вещество-а"
+      }
+    },
+    {
+      "registration": "SYNTHETIC-2",
+      "trade_name": "Демо-Б",
+      "mnn": "демо-вещество-б",
+      "form": "",
+      "source": {
+        "title": "Синтетический реестр для проверки контракта, не данные ГРЛС",
+        "url": "https://grls.rosminzdrav.ru/GRLS.aspx",
+        "version": "synthetic-1",
+        "location": "Синтетическая строка 2",
+        "retrieved_at": "2026-11-10",
+        "quote": "Синтетическое сопоставление: демо-вещество-б"
+      }
+    },
+    {
+      "registration": "SYNTHETIC-3",
+      "trade_name": "Демо-В",
+      "mnn": "демо-вещество-в",
+      "form": "",
+      "source": {
+        "title": "Синтетический реестр для проверки контракта, не данные ГРЛС",
+        "url": "https://grls.rosminzdrav.ru/GRLS.aspx",
+        "version": "synthetic-1",
+        "location": "Синтетическая строка 3",
+        "retrieved_at": "2026-11-10",
+        "quote": "Синтетическое сопоставление: демо-вещество-в"
+      }
+    },
+    {
+      "registration": "SYNTHETIC-5",
+      "trade_name": "Нет основания",
+      "mnn": "демо-вне-корпуса",
+      "form": "",
+      "source": {
+        "title": "Синтетический реестр для проверки контракта, не данные ГРЛС",
+        "url": "https://grls.rosminzdrav.ru/GRLS.aspx",
+        "version": "synthetic-1",
+        "location": "Синтетическая строка 5",
+        "retrieved_at": "2026-11-10",
+        "quote": "Синтетическое сопоставление: демо-вне-корпуса"
+      }
+    },
+    {
+      "registration": "SYNTHETIC-6",
+      "trade_name": "Условный демо-препарат",
+      "mnn": "демо-условное",
+      "form": "",
+      "source": {
+        "title": "Синтетический реестр для проверки контракта, не данные ГРЛС",
+        "url": "https://grls.rosminzdrav.ru/GRLS.aspx",
+        "version": "synthetic-1",
+        "location": "Синтетическая строка 6",
+        "retrieved_at": "2026-11-10",
+        "quote": "Синтетическое сопоставление: демо-условное"
+      }
+    },
+    {
+      "registration": "SYNTHETIC-7",
+      "trade_name": "Конфликт демо-категории",
+      "mnn": "демо-вещество-а",
+      "form": "",
+      "source": {
+        "title": "Синтетический реестр для проверки контракта, не данные ГРЛС",
+        "url": "https://grls.rosminzdrav.ru/GRLS.aspx",
+        "version": "synthetic-1",
+        "location": "Синтетическая строка 7",
+        "retrieved_at": "2026-11-10",
+        "quote": "Синтетическое сопоставление: демо-вещество-а"
+      }
+    },
+    {
+      "registration": "SYNTHETIC-8",
+      "trade_name": "Недостаточная проверка",
+      "mnn": "демо-вещество-а",
+      "form": "",
+      "source": {
+        "title": "Синтетический реестр для проверки контракта, не данные ГРЛС",
+        "url": "https://grls.rosminzdrav.ru/GRLS.aspx",
+        "version": "synthetic-1",
+        "location": "Синтетическая строка 8",
+        "retrieved_at": "2026-11-10",
+        "quote": "Синтетическое сопоставление: демо-вещество-а"
+      }
+    }
+  ]
+}
