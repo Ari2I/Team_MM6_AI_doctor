@@ -613,9 +613,9 @@ def fragments_for_inn(
     inn: str,
     *,
     max_fragments: int = 20,
-    window_chars: int = 1000,
+    window_chars: int = 3000,
 ) -> tuple[EvidenceFragment, ...]:
-    """Вернуть все проверяемые окна по МНН с оригинальной ссылкой и URL копии."""
+    """Вернуть окна по МНН с контекстом условий и роли, оригинальной ссылкой и копией."""
 
     if not recommendation.is_current_ministry_copy:
         return ()

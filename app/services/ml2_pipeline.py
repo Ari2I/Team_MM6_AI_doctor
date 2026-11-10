@@ -10,6 +10,8 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.models import Application, ApplicationDiagnosis, ApplicationItem, ItemCheck
+from app.models.enums import DrugCategory
+from app.services.reference_seed import CATEGORIES
 from app.services.ml2_classifier import ClassificationResult, classify_purchase, gigachat_completer
 from app.services.ml2_clinicalrecs_source import (
     ClinicalSourceError,
@@ -114,11 +116,7 @@ def classify_official_application(
     run_id: str,
     index: OfficialIndex,
 ) -> dict:
-    """Классифицировать пары из синтетической заявки и сохранить отдельно от category.
-
-    Категория ItemCheck не изменяется. ML-2 результат остаётся предложением с
-    собственным статусом и цитатами, доступными следующему этапу GigaChat.
-    """
+    """Сохранить предварительную категорию и её основание для следующего этапа."""
 
     with sessions() as session:
         application = session.get(Application, application_id)
@@ -166,7 +164,7 @@ def classify_official_application(
                     item.dosage,
                     diagnosis.name,
                     item.mnn,
-                    check.category is not None,
+                    check.category is not None and not (check.evidence or {}).get("ml2_owns_category"),
                 )
             )
 
@@ -606,8 +604,28 @@ def classify_official_application(
             check = checks.get(check_id)
             if check is None:
                 continue
-            # ML-2 proposes a separate result and never changes the upstream category.
             evidence = check.evidence or {}
+            owns_category = bool(evidence.get("ml2_owns_category"))
+            if check.category is None or owns_category:
+                # A retry can withdraw a previous proposal. Official conflicts,
+                # unmet rule conditions and ambiguous registrations take precedence.
+                owns_category = (
+                    outcome["status"] == "PROPOSED"
+                    and bool(outcome["citations"])
+                    and evidence.get("reason_code") in {
+                        "OFFICIAL_COPY_MENTION", "OFFICIAL_DOCUMENT_MENTION",
+                        "OFFICIAL_LINK_REQUIRES_REVIEW",
+                        # The static index predates this diagnosis. ML-2 already
+                        # checked the catalog edition, ICD scope and fresh text.
+                        "OFFICIAL_DIAGNOSIS_NOT_INDEXED",
+                    }
+                )
+                check.category = next(
+                    (DrugCategory(key) for key, label in CATEGORIES.items()
+                     if owns_category and label == outcome["proposed_category"]), None
+                )
+                if check.category is not None:
+                    check.needs_review = True
             review_sources = list(evidence.get("review_sources") or [])
             seen = {(row.get("fragment_id"), row.get("quote")) for row in review_sources}
             for citation in outcome.get("citations", []):
@@ -616,6 +634,7 @@ def classify_official_application(
                     review_sources.append(citation)
                     seen.add(key)
             check.evidence = evidence | {
+                "ml2_owns_category": owns_category,
                 "ml2_classification": outcome,
                 "review_sources": review_sources[:20],
             }
