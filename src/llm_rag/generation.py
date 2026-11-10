@@ -1,6 +1,6 @@
 """Подготовка одной позиции и разрешённых оснований для генерации с ограничениями."""
 
-from llm_rag.contracts import PairInput, AnalysisRequest, PairContext
+from llm_rag.contracts import AnalysisItem, AnalysisRequest
 from llm_rag.corpus import Corpus
 from llm_rag.evidence import EvidencePacket
 
@@ -17,7 +17,7 @@ INSTRUCTIONS = (
 
 
 def build_payload(
-    request: AnalysisRequest | PairContext, item: PairInput, packet: EvidencePacket, corpus: Corpus
+    request: AnalysisRequest, item: AnalysisItem, packet: EvidencePacket, corpus: Corpus
 ) -> dict:
     sources = {source.source_id: source for source in corpus.sources}
     relevant_keys = {key for claim in packet.claims for key in claim.fragment.required_context}
@@ -27,7 +27,7 @@ def build_payload(
         "item": {
             "item_id": item.item_id, "inn": item.inn, "category": item.category,
             "diagnosis": request.diagnosis, "classification_reason": item.classification_reason,
-            **({"original_dosage": item.original_dosage} if item.original_dosage is not None else {}),
+            "original_dosage": item.original.dosage,
             "dosage_check": item.dosage_check.model_dump(mode="json"),
             "context": {key: request.context[key] for key in sorted(relevant_keys) if key in request.context},
         },

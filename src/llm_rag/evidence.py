@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from llm_rag.contracts import PairInput, AnalysisRequest, PairContext, ExplanationStatus
+from llm_rag.contracts import AnalysisItem, AnalysisRequest, ExplanationStatus
 from llm_rag.corpus import Assertion, Fragment, normalize
 
 
@@ -23,7 +23,7 @@ class EvidencePacket:
 
 
 def build_evidence(
-    request: AnalysisRequest | PairContext, item: PairInput, fragments: list[Fragment]
+    request: AnalysisRequest, item: AnalysisItem, fragments: list[Fragment]
 ) -> EvidencePacket:
     reasons: list[str] = []
     missing = list(item.missing_data) + list(item.dosage_check.missing_data)
@@ -52,7 +52,7 @@ def build_evidence(
         if normalize(fragment.diagnosis) != normalize(request.diagnosis):
             continue
         relevant = [a for a in fragment.assertions if a.kind == "CATEGORY" or (
-            "DOSAGE" in required and a.dosage == item.original_dosage
+            "DOSAGE" in required and a.dosage == item.original.dosage
         )]
         if not relevant:
             continue

@@ -58,8 +58,9 @@ class DosageCheck(Model):
     missing_data: list[Text]
 
 
-class PairInput(Model):
+class AnalysisItem(Model):
     item_id: Text
+    original: Original
     inn: Text | None
     category: Category | None
     classification_reason: Text | None
@@ -67,24 +68,6 @@ class PairInput(Model):
     source_refs: list[Text]
     upstream_status: Literal["PROCESSED", "PARTIAL", "FAILED"]
     missing_data: list[Text]
-
-
-    @property
-    def original_dosage(self) -> str | None:
-        return None
-
-
-class AnalysisItem(PairInput):
-    original: Original
-
-    @property
-    def original_dosage(self) -> str:
-        return self.original.dosage
-
-
-class PairContext(Model):
-    diagnosis: Text
-    context: dict[Text, Text] = Field(default_factory=dict)
 
 
 class AnalysisRequest(Model):
@@ -120,17 +103,13 @@ class VerifiedClaim(Model):
     citations: Annotated[list[Citation], Field(min_length=1)]
 
 
-class PairExplanation(Model):
+class ItemResult(AnalysisItem):
     explanation_status: ExplanationStatus
     comment: str
     claims: list[VerifiedClaim]
     review_sources: list[Citation]
     reasons: list[Text]
     explanation_missing_data: list[Text]
-
-
-class ItemResult(AnalysisItem, PairExplanation):
-    pass
 
 
 class SummaryRef(Model):

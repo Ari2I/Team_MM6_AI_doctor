@@ -1,82 +1,25 @@
-# Локальные материалы, загруженные заявки и выгрузки
+# Локальные материалы помощника, отчёты, результаты и временные файлы
 /.local/
 /AGENTS.md
 /.superpowers/
-/.worktrees/
 /artifacts/
-/downloaded_files/
 /latest_logs/
-/outputs/
-/results/
-/tmp/
-/temp/
-*.log
 *.schema.json
-*.xls
-*.xlsx
-*.xlsm
-*.xlsb
-*.ods
-!/examples/demo.xlsx
-!/tests/data/*.xls
-!/tests/data/*.xlsx
-!/tests/backend/data/*.xls
-!/tests/backend/data/*.xlsx
 
-# Секреты и локальная конфигурация
+# Секреты и локальная конфигурация окружения
 .env
 .env.*
 !.env.example
-.envrc
-.envrc.local
-.flaskenv
-.direnv/
-.secrets/
-/secrets/
-/credentials/
-secrets.json
-secrets.yaml
-secrets.yml
-credentials.json
-credentials.local.*
-service-account*.json
-*.secret
-*.token
-*.pem
-*.key
-*.p12
-*.pfx
-*.jks
-*.keystore
-id_rsa
-id_dsa
-id_ecdsa
-id_ed25519
-.aws/
-.azure/
-.kube/
-.ssh/
-.gnupg/
-**/.config/gcloud/
-**/.docker/config.json
-.netrc
-_netrc
-.git-credentials
-.pgpass
-pgpass.conf
-.pypirc
-.npmrc
-
-# Python, виртуальные окружения и отчёты тестов
 .venv/
 venv/
 env/
+
+# Python, тесты и анализ кода
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.hypothesis/
 .tox/
 .nox/
 .coverage
@@ -84,52 +27,33 @@ __pycache__/
 coverage.xml
 htmlcov/
 *.cover
-*.py,cover
-.ipynb_checkpoints/
 
-# Сборка, зависимости и кэши
+# Сборка и метаданные пакетов
 build/
 dist/
 *.egg-info/
 *.egg
 *.whl
-node_modules/
-.vite/
-.cache/
-.eslintcache
-*.tsbuildinfo
-playwright-report/
-test-results/
 
-# Локальные базы данных, модели и импорты
+# Модели, локальные данные и журналы
 /models/
-/data/*
-!/data/demo/
-/data/demo/*
-!/data/demo/reference.json
-!/data/official/
-/data/official/*
-!/data/official/compositions.csv
-!/data/official/evidence.csv
-*.sqlite
-*.sqlite-*
-*.sqlite3
-*.sqlite3-*
-*.pgdump
+/data/
+/outputs/
+/results/
+*.log
 *.safetensors
 *.onnx
 *.pt
 *.pth
+*.pem
+*.key
 
-# Редакторы, временные файлы и метаданные ОС
+# Настройки редакторов и файлы операционной системы
 .idea/
 .vscode/
-.vs/
 .DS_Store
 Thumbs.db
 Desktop.ini
 ~$*
-*.swp
-*.swo
 *.tmp
 *.bak

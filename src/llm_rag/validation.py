@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
-from llm_rag.contracts import PairInput, Citation, Model, Text, VerifiedClaim
+from llm_rag.contracts import AnalysisItem, Citation, Model, Text, VerifiedClaim
 from llm_rag.corpus import Corpus
 from llm_rag.evidence import EvidenceClaim, EvidencePacket
 
@@ -42,7 +42,7 @@ def citation_for(claim: EvidenceClaim, corpus: Corpus) -> Citation:
 
 
 def validate_generation(
-    raw: dict, packet: EvidencePacket, item: PairInput, corpus: Corpus
+    raw: dict, packet: EvidencePacket, item: AnalysisItem, corpus: Corpus
 ) -> ValidationOutcome:
     try:
         response = GeneratedResponse.model_validate(raw)

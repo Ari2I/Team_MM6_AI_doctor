@@ -1,55 +1,25 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vrach-backend"
+name = "llm-rag-demo"
 version = "0.1.0"
-description = "Backend ассистента комиссии по трудным жизненным ситуациям."
+description = "Модуль RAG с проверкой оснований и генерацией комментариев по синтетическим заявкам"
 readme = "README.md"
-requires-python = "~=3.11.0"
-dependencies = [
-    "fastapi>=0.115,<1",
-    "uvicorn[standard]>=0.30,<1",
-    "pydantic>=2.9,<3",
-    "pydantic-settings>=2.5,<3",
-    "SQLAlchemy>=2.0,<3",
-    "alembic>=1.13,<2",
-    "psycopg[binary]>=3.2,<4",
-    "pandas>=2.2,<3",
-    "openpyxl>=3.1,<4",
-    "rapidfuzz>=3.9,<4",
-    "python-multipart>=0.0.22,<1",
-    "python-dotenv>=1,<2",
-    "gigachat==0.2.0",
-    "httpx>=0.27,<1",
-]
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
 
 [project.scripts]
 llm-rag = "llm_rag.__main__:main"
 
-[project.optional-dependencies]
-sources = ["pypdf>=5,<7"]
-vector = ["torch>=2.6,<3", "transformers>=4.57,<5", "huggingface-hub>=0.34,<1"]
-dev = [
-    "pytest>=8.3,<9",
-    "httpx>=0.27,<1",
-    "ruff>=0.9,<1",
-    "jsonschema>=4,<5",
-    "requests>=2.32,<3",
-]
-
 [tool.setuptools.packages.find]
-where = [".", "src"]
-include = ["app*", "llm_rag*"]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 testpaths = ["tests"]
-pythonpath = [".", "src"]
-
-[tool.ruff]
-target-version = "py311"
-line-length = 100
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+cache_dir = ".local/cache/pytest"

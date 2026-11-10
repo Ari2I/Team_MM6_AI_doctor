@@ -1,8 +1,6 @@
 """Загрузка версионированного синтетического корпуса с ручной разметкой без скачивания документов."""
 
-from datetime import date
 from typing import Literal
-from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 
@@ -19,22 +17,6 @@ class Source(Model):
     source_type: Literal["MASTER_LIST", "PROTOCOL", "DOSAGE"]
     version: Text
     is_demo: DemoFlag
-
-    origin: Literal["official", "synthetic"] = "synthetic"
-    url: Text | None = None
-    publisher: Text | None = None
-    retrieved_at: Text | None = None
-
-    @model_validator(mode="after")
-    def validate_provenance(self):
-        if self.origin == "official":
-            if not (self.url and self.publisher and self.retrieved_at):
-                raise ValueError("Укажите адрес, издателя и дату получения источника.")
-            address = urlsplit(self.url)
-            if address.scheme != "https" or not address.hostname or address.username:
-                raise ValueError("Ожидается ссылка HTTPS без учётных данных.")
-            date.fromisoformat(self.retrieved_at)
-        return self
 
 
 class Assertion(Model):

@@ -4,7 +4,7 @@ import re
 import hashlib
 from collections import defaultdict
 
-from llm_rag.contracts import PairInput, RetrievalInfo
+from llm_rag.contracts import AnalysisItem, RetrievalInfo
 from llm_rag.corpus import Corpus, Fragment, normalize
 from llm_rag.embeddings import Embedder
 from llm_rag.vector_index import VectorIndex
@@ -30,7 +30,7 @@ class Retriever:
             corpus_fingerprint=hashlib.sha256(corpus.model_dump_json().encode("utf-8")).hexdigest(),
         )
 
-    def search(self, item: PairInput, diagnosis: str) -> list[Fragment]:
+    def search(self, item: AnalysisItem, diagnosis: str) -> list[Fragment]:
         if item.inn is None:
             return []
         candidates = self._index.get((normalize(item.inn), normalize(diagnosis)), [])
@@ -41,7 +41,7 @@ class Retriever:
         semantic = {}
         if self._vectors is not None:
             text = (f"МНН: {item.inn}. Диагноз: {diagnosis}. "
-                    f"{item.classification_reason or ''} Дозировка: {item.original_dosage}. "
+                    f"{item.classification_reason or ''} Дозировка: {item.original.dosage}. "
                     f"{item.dosage_check.reason or ''}")
             semantic = self._vectors.similarities(self._embedder.embed_query(text))
 
