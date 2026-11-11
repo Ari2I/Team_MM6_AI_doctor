@@ -1,0 +1,340 @@
+{
+  "inputs": [
+    {
+      "request_id": "DEMO-2026-001",
+      "item_id": "row-1",
+      "diagnosis_id": "synthetic-d1",
+      "schema_version": "explanation.1",
+      "is_demo": true,
+      "diagnosis": "Демо-диагноз",
+      "inn": "демо-вещество-а",
+      "category": "А",
+      "ml2_status": "PROPOSED",
+      "rule_applied": true,
+      "classification_reason": "Основная терапия в тестовом перечне.",
+      "conditions": [],
+      "missing_context": [],
+      "citations": [
+        {
+          "source_id": "master-demo",
+          "fragment_id": "master-a",
+          "title": "Синтетический Master List — не медицинский источник",
+          "version": "demo-1",
+          "url": "",
+          "copy_url": null,
+          "location": "запись DEMO-A",
+          "quote": "Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия."
+        }
+      ],
+      "source_refs": [
+        "master-a"
+      ],
+      "context": {},
+      "dosage_check": {
+        "status": "INSUFFICIENT_DATA",
+        "reason": "Схема приёма не передана; дозировка не подтверждена.",
+        "missing_data": [
+          "разовая доза",
+          "кратность приёма",
+          "длительность курса"
+        ]
+      }
+    },
+    {
+      "request_id": "DEMO-2026-001",
+      "item_id": "row-2",
+      "diagnosis_id": "synthetic-d1",
+      "schema_version": "explanation.1",
+      "is_demo": true,
+      "diagnosis": "Демо-диагноз",
+      "inn": "демо-вещество-б",
+      "category": "Б",
+      "ml2_status": "PROPOSED",
+      "rule_applied": true,
+      "classification_reason": "Сопутствующая терапия в тестовом перечне.",
+      "conditions": [],
+      "missing_context": [],
+      "citations": [
+        {
+          "source_id": "master-demo",
+          "fragment_id": "master-b",
+          "title": "Синтетический Master List — не медицинский источник",
+          "version": "demo-1",
+          "url": "",
+          "copy_url": null,
+          "location": "запись DEMO-B",
+          "quote": "Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия."
+        }
+      ],
+      "source_refs": [
+        "master-b"
+      ],
+      "context": {},
+      "dosage_check": {
+        "status": "INSUFFICIENT_DATA",
+        "reason": "Схема приёма не передана; дозировка не подтверждена.",
+        "missing_data": [
+          "разовая доза",
+          "кратность приёма",
+          "длительность курса"
+        ]
+      }
+    }
+  ],
+  "snapshot": {
+    "snapshot_version": "synthetic-demo1",
+    "documents": [
+      {
+        "source_id": "master-demo",
+        "fragment_id": "master-a",
+        "title": "Синтетический Master List — не медицинский источник",
+        "version": "demo-1",
+        "url": "https://example.org/synthetic-corpus",
+        "copy_url": null,
+        "location": "запись DEMO-A",
+        "text": "ДЕМО. Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия.",
+        "diagnosis": "Демо-диагноз",
+        "inn": "демо-вещество-а",
+        "required_context": {},
+        "retrieved_at": "2026-11-11T00:00:00Z"
+      },
+      {
+        "source_id": "master-demo",
+        "fragment_id": "master-b",
+        "title": "Синтетический Master List — не медицинский источник",
+        "version": "demo-1",
+        "url": "https://example.org/synthetic-corpus",
+        "copy_url": null,
+        "location": "запись DEMO-B",
+        "text": "ДЕМО. Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия.",
+        "diagnosis": "Демо-диагноз",
+        "inn": "демо-вещество-б",
+        "required_context": {},
+        "retrieved_at": "2026-11-11T00:00:00Z"
+      }
+    ]
+  },
+  "approved_corpus": {
+    "corpus_version": "demo-2026-10-18.1",
+    "is_demo": true,
+    "sources": [
+      {
+        "source_id": "master-demo",
+        "title": "Синтетический Master List — не медицинский источник",
+        "source_type": "MASTER_LIST",
+        "version": "demo-1",
+        "is_demo": true
+      },
+      {
+        "source_id": "protocol-demo",
+        "title": "Синтетический протокол — не медицинский источник",
+        "source_type": "PROTOCOL",
+        "version": "demo-1",
+        "is_demo": true
+      },
+      {
+        "source_id": "dosage-demo",
+        "title": "Синтетические правила дозировок — не медицинский источник",
+        "source_type": "DOSAGE",
+        "version": "demo-1",
+        "is_demo": true
+      }
+    ],
+    "fragments": [
+      {
+        "fragment_id": "master-a",
+        "source_id": "master-demo",
+        "location": "запись DEMO-A",
+        "inn": "демо-вещество-а",
+        "diagnosis": "Демо-диагноз",
+        "required_context": {},
+        "text": "ДЕМО. Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия.",
+        "assertions": [
+          {
+            "claim_id": "category-a",
+            "kind": "CATEGORY",
+            "category": "А",
+            "dosage_status": null,
+            "dosage": null,
+            "upstream_reason": "Основная терапия в тестовом перечне.",
+            "text": "Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия.",
+            "quote": "Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия."
+          }
+        ]
+      },
+      {
+        "fragment_id": "master-b",
+        "source_id": "master-demo",
+        "location": "запись DEMO-B",
+        "inn": "демо-вещество-б",
+        "diagnosis": "Демо-диагноз",
+        "required_context": {},
+        "text": "ДЕМО. Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия.",
+        "assertions": [
+          {
+            "claim_id": "category-b",
+            "kind": "CATEGORY",
+            "category": "Б",
+            "dosage_status": null,
+            "dosage": null,
+            "upstream_reason": "Сопутствующая терапия в тестовом перечне.",
+            "text": "Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия.",
+            "quote": "Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия."
+          }
+        ]
+      }
+    ]
+  },
+  "purchases": [
+    {
+      "request_id": "DEMO-2026-001",
+      "item_id": "row-1",
+      "amount": "125.50",
+      "currency": "RUB"
+    },
+    {
+      "request_id": "DEMO-2026-001",
+      "item_id": "row-2",
+      "amount": "74.50",
+      "currency": "RUB"
+    }
+  ],
+  "expected_result": {
+    "schema_version": "explanation.1",
+    "pairs": [
+      {
+        "request_id": "DEMO-2026-001",
+        "item_id": "row-1",
+        "diagnosis_id": "synthetic-d1",
+        "schema_version": "explanation.1",
+        "category": "А",
+        "ml2_status": "PROPOSED",
+        "classification_basis": "APPROVED_RULE",
+        "evidence_status": "VERIFIED",
+        "comment": "Найдено применимое согласованное основание для исходной категории А. Дозировка не оценивалась в этом режиме. Проверка основания не заменяет медицинскую приёмку; решение принимает специалист.",
+        "citations": [
+          {
+            "source_id": "master-demo",
+            "fragment_id": "master-a",
+            "title": "Синтетический Master List — не медицинский источник",
+            "version": "demo-1",
+            "url": "https://example.org/synthetic-corpus",
+            "copy_url": null,
+            "location": "запись DEMO-A",
+            "quote": "Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия."
+          }
+        ],
+        "reasons": [],
+        "missing_context": [],
+        "requires_review": true,
+        "dosage_check": {
+          "status": "INSUFFICIENT_DATA",
+          "reason": "Схема приёма не передана; дозировка не подтверждена.",
+          "missing_data": [
+            "разовая доза",
+            "кратность приёма",
+            "длительность курса"
+          ]
+        },
+        "snapshot_version": "synthetic-demo1",
+        "approved_corpus_version": "demo-2026-10-18.1",
+        "rendering_reasons": []
+      },
+      {
+        "request_id": "DEMO-2026-001",
+        "item_id": "row-2",
+        "diagnosis_id": "synthetic-d1",
+        "schema_version": "explanation.1",
+        "category": "Б",
+        "ml2_status": "PROPOSED",
+        "classification_basis": "APPROVED_RULE",
+        "evidence_status": "VERIFIED",
+        "comment": "Найдено применимое согласованное основание для исходной категории Б. Дозировка не оценивалась в этом режиме. Проверка основания не заменяет медицинскую приёмку; решение принимает специалист.",
+        "citations": [
+          {
+            "source_id": "master-demo",
+            "fragment_id": "master-b",
+            "title": "Синтетический Master List — не медицинский источник",
+            "version": "demo-1",
+            "url": "https://example.org/synthetic-corpus",
+            "copy_url": null,
+            "location": "запись DEMO-B",
+            "quote": "Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия."
+          }
+        ],
+        "reasons": [],
+        "missing_context": [],
+        "requires_review": true,
+        "dosage_check": {
+          "status": "INSUFFICIENT_DATA",
+          "reason": "Схема приёма не передана; дозировка не подтверждена.",
+          "missing_data": [
+            "разовая доза",
+            "кратность приёма",
+            "длительность курса"
+          ]
+        },
+        "snapshot_version": "synthetic-demo1",
+        "approved_corpus_version": "demo-2026-10-18.1",
+        "rendering_reasons": []
+      }
+    ],
+    "summary_text": "Резюме для секретаря. Суммы отражают расходы и исходные категории; размер компенсации не определяется.\nРазрезы категорий, диагнозов и ручной сверки могут пересекаться и не складываются между собой.\nОбщие расходы учитывают каждую покупку один раз отдельно по валютам; неизвестные суммы не заменены нулём.\nПара [\"DEMO-2026-001\", \"row-1\", \"synthetic-d1\"]: Найдено применимое согласованное основание для исходной категории А. Дозировка не оценивалась в этом режиме. Проверка основания не заменяет медицинскую приёмку; решение принимает специалист.\nПара [\"DEMO-2026-001\", \"row-2\", \"synthetic-d1\"]: Найдено применимое согласованное основание для исходной категории Б. Дозировка не оценивалась в этом режиме. Проверка основания не заменяет медицинскую приёмку; решение принимает специалист.",
+    "summary_refs": [
+      {
+        "pair_id": "[\"DEMO-2026-001\", \"row-1\", \"synthetic-d1\"]",
+        "citations": [
+          {
+            "source_id": "master-demo",
+            "fragment_id": "master-a",
+            "title": "Синтетический Master List — не медицинский источник",
+            "version": "demo-1",
+            "url": "https://example.org/synthetic-corpus",
+            "copy_url": null,
+            "location": "запись DEMO-A",
+            "quote": "Демо-вещество-а при демо-диагнозе отнесено в тестовом перечне к категории А как основная терапия."
+          }
+        ]
+      },
+      {
+        "pair_id": "[\"DEMO-2026-001\", \"row-2\", \"synthetic-d1\"]",
+        "citations": [
+          {
+            "source_id": "master-demo",
+            "fragment_id": "master-b",
+            "title": "Синтетический Master List — не медицинский источник",
+            "version": "demo-1",
+            "url": "https://example.org/synthetic-corpus",
+            "copy_url": null,
+            "location": "запись DEMO-B",
+            "quote": "Демо-вещество-б при демо-диагнозе отнесено в тестовом перечне к категории Б как сопутствующая терапия."
+          }
+        ]
+      }
+    ],
+    "unresolved_pair_ids": [],
+    "requires_review": true,
+    "snapshot_versions": [
+      "synthetic-demo1"
+    ],
+    "approved_corpus_versions": [
+      "demo-2026-10-18.1"
+    ],
+    "costs_by_currency": [
+      {
+        "currency": "RUB",
+        "known_total_amount": "200.00",
+        "unknown_amount_count": 0,
+        "amounts_by_upstream_category": {
+          "А": "125.50",
+          "Б": "74.50"
+        },
+        "amount_requiring_review": "200.00",
+        "amounts_by_diagnosis": {
+          "synthetic-d1": "200.00"
+        }
+      }
+    ],
+    "purchases_without_amount": []
+  }
+}

@@ -68,6 +68,7 @@ def test_real_sdk_receives_typed_chat_and_manages_oauth(sdk_wire, monkeypatch):
     sdk_wire.handler = handler
     client = make_provider()
     assert client.generate(payload) == raw
+    assert client.usage_totals == {'prompt_tokens': 100, 'completion_tokens': 40, 'total_tokens': 140}
     assert len(calls) == 1
     assert isinstance(calls[0], Chat)
     auth, chat = sdk_wire.requests

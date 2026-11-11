@@ -71,6 +71,7 @@ class GigaChatProvider:
         if type(verify_ssl_certs) is not bool:
             raise ValueError("Проверка сертификата должна задаваться логическим значением")
         self._model = model
+        self.usage_totals = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
         tls = ssl.create_default_context() if verify_ssl_certs else None
         if tls is not None and ca_bundle:
             tls.load_verify_locations(cafile=ca_bundle)
@@ -107,6 +108,10 @@ class GigaChatProvider:
                            for key in ("claim_id", "text", "fragment_id", "quote")},
             "required": ["claim_id", "text", "fragment_id", "quote"],
         } for claim in payload["evidence"]]
+        staff_mode = payload.get('schema_version') == 'staff-report.1'
+        if staff_mode:
+            for alternative, claim in zip(alternatives, payload['evidence']):
+                alternative['properties']['text']['enum'] = [claim['text'], *claim.get('allowed_texts', [])]
         schema["properties"]["claims"] = {
             "type": "array", "minItems": len(alternatives), "maxItems": len(alternatives),
             "uniqueItems": True,
@@ -115,17 +120,27 @@ class GigaChatProvider:
         }
         # Инструкции заданы кодом и не берутся из входного запроса или текста документов.
         context = {key: payload[key] for key in ("schema_version", "is_demo", "corpus_version", "item", "evidence")}
+        instructions = INSTRUCTIONS
+        if staff_mode:
+            from llm_rag.staff_report import STAFF_INSTRUCTIONS
+            instructions = STAFF_INSTRUCTIONS
         try:
             request = Chat(
-                model=self._model, stream=False, function_call="none", max_tokens=2048,
+                model=self._model, stream=False, function_call="none", max_tokens=4096 if staff_mode else 2048,
                 messages=[
-                    {"role": "system", "content": INSTRUCTIONS},
+                    {"role": "system", "content": instructions},
                     {"role": "user", "content": json.dumps(context, ensure_ascii=False, allow_nan=False)},
                 ],
                 # В SDK 0.2.0 дополнительные параметры передаются через additional_fields.
                 additional_fields={"response_format": {"type": "json_schema", "schema": schema, "strict": True}},
             )
             response = self._client.chat(request)
+            # Только счётчики из ответа API, без текста запроса и учётных данных.
+            if response.usage is not None:
+                for key in self.usage_totals:
+                    value = getattr(response.usage, key, None)
+                    if isinstance(value, int) and value >= 0:
+                        self.usage_totals[key] += value
             if len(response.choices) != 1:
                 raise ProviderError("GIGACHAT_INVALID_COMPLETION")
             choice = response.choices[0]

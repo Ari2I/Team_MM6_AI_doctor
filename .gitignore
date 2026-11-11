@@ -40,6 +40,11 @@ dist/
 /data/
 /outputs/
 /results/
+/downloaded_files/
+/excel_results/
+/excel_input/*
+!/excel_input/01_Подходящие_препараты.xlsx
+!/excel_input/02_Препарат_другого_назначения.xlsx
 *.log
 *.safetensors
 *.onnx
@@ -47,6 +52,8 @@ dist/
 *.pth
 *.pem
 *.key
+*.p12
+*.pfx
 
 # Настройки редакторов и файлы операционной системы
 .idea/
