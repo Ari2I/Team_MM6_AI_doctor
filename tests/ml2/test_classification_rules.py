@@ -65,13 +65,15 @@ def classify(assessment, text, *, missing=(), quote=None):
         ("OPTIONAL_PRODUCT", "Тестовое вещество является витамином.", "В"),
     ],
 )
-def test_provisional_category_without_approved_list(assessment, text, expected):
+def test_category_without_approved_list(assessment, text, expected):
     result = classify(assessment, text)
     assert result.proposed_category == expected
     assert result.status == "PROPOSED"
     assert result.model_assessment == assessment
     assert result.policy_version == load_classification_rules().policy_version
-    assert "Предварительная" in result.review_reason
+    assert result.review_reason.startswith(f"Категория {expected}:")
+    assert "предварительн" not in result.review_reason.casefold()
+    assert load_classification_rules().mode == "CLINICAL_RECOMMENDATIONS"
     assert "подтверждённое правило" not in result.review_reason
 
 
@@ -164,7 +166,7 @@ def test_invalid_rules_cannot_silently_change_category_semantics():
         ClassificationRules.model_validate(rules)
 
 
-def test_core_proposal_reaches_existing_rag_and_approved_rule_has_priority():
+def test_category_reaches_existing_rag_and_approved_rule_has_priority():
     request = AnalysisRequest.model_validate_json(
         (ROOT / "examples/request.json").read_bytes()
     )

@@ -41,7 +41,7 @@ class ClassificationRules(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     policy_version: str = Field(min_length=1)
-    mode: Literal["PROVISIONAL"]
+    mode: Literal["CLINICAL_RECOMMENDATIONS"]
     assessments: dict[str, AssessmentRule]
 
 
