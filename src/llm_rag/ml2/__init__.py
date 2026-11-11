@@ -7,6 +7,7 @@ from .classifier import (
     gigachat_completer,
 )
 from .pipeline import ML2Batch, ML2Pipeline
+from .policy import load_classification_policy
 from .registry import RegistrySnapshot
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "RegistrySnapshot",
     "classify_pair",
     "gigachat_completer",
+    "load_classification_policy",
 ]
