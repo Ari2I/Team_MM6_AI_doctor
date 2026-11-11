@@ -120,3 +120,31 @@ def test_sdk_report_uses_staff_instructions_and_variants(sdk_wire):
         report = recommend_for_staff([inp], [pair], provider=provider)
         assert report.generation_status == 'MODEL'
         assert provider.usage_totals['total_tokens'] == 140
+
+
+@pytest.mark.parametrize("category", ["А", "Б", "В"])
+@pytest.mark.parametrize("variant", [None, "variant"])
+def test_completed_clinical_category_does_not_require_approved_corpus(category, variant):
+    inp, pair = values("PROPOSED")
+    inp.category = pair.category = category
+    inp.rule_applied = False
+    assert pair.evidence_status == "VERIFIED"
+    assert pair.classification_basis == "ML2_PROPOSAL"
+    report = recommend_for_staff([inp], [pair], provider=ReportProvider(variant))
+    assert report.generation_status == "MODEL"
+    text = " ".join(report.recommendations[0].actions)
+    assert f"Категория {category}" in text
+    assert "присвоена" in text
+    assert "согласованное основание для" not in text
+    assert "Не подтверждайте категорию" not in text
+    assert "выплат" in text
+    assert pair.category == category
+
+
+@pytest.mark.parametrize("status", ["UNCONFIRMED", "INSUFFICIENT_DATA", "SOURCE_CONFLICT", "PROCESSING_ERROR"])
+def test_unverified_evidence_never_gets_success_recommendation(status):
+    inp, pair = values("PROPOSED")
+    pair.evidence_status = status
+    report = recommend_for_staff([inp], [pair])
+    text = " ".join(report.recommendations[0].actions)
+    assert "Категория А присвоена" not in text

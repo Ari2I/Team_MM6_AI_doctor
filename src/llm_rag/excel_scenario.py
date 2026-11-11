@@ -225,11 +225,14 @@ def write_report(folder, name, app, usage, items, *, staff_report=None):
         'article{border-top:1px solid #ccd5df;padding:18px 0}blockquote{background:#f1f5fa;padding:12px}'
         'pre{white-space:pre-wrap}a{color:#175a9c}</style>',
         '<h1>Проверка заявки: ' + escape(name) + '</h1>',
-        '<p>Учебная карточка с реальными названиями. Каждая категория требует сверки специалистом. '
+        '<p>Учебная карточка с реальными названиями. Классификация по клиническим рекомендациям. '
         'Решение о выплате не принимается. Дозировка не оценивалась.</p>']
     classified = sum(p.category is not None for p in app.pairs)
     parts.append(f'<p><strong>Категория назначена для {classified} из {len(app.pairs)} позиций.</strong> '
-                 + ('Автоматическая классификация неполная.' if classified < len(app.pairs) else 'Категории предварительные.') + '</p>')
+                 + ('Для позиций без категории указаны причины и недостающие сведения.'
+                    if classified < len(app.pairs) else 'Классификация всех позиций завершена.') + '</p>')
+    if app.unresolved_pair_ids:
+        parts.append(f'<p>Проверка оснований требует уточнения для {len(app.unresolved_pair_ids)} позиций. Причины приведены ниже.</p>')
     recommendations = {}
     if staff_report is not None:
         from llm_rag.explanation_contracts import pair_key

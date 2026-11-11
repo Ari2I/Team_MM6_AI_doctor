@@ -78,8 +78,9 @@ def main(argv=None):
         kwargs = dict(credentials=settings.get('GIGACHAT_CREDENTIALS'),
             access_token=settings.get('GIGACHAT_ACCESS_TOKEN'), enabled=True,
             model=settings.get('GIGACHAT_MODEL') or 'GigaChat-2',
-            scope=settings.get('GIGACHAT_SCOPE') or 'GIGACHAT_API_PERS',
+            scope=settings.get('GIGACHAT_SCOPE') or 'GIGACHAT_API_B2B',
             ca_bundle=ca, verify_ssl_certs=args.verify_ssl_certs, timeout=60)
+        print(f'GigaChat: тип доступа {kwargs["scope"]}.', flush=True)
         technical_errors = False
         with ExitStack() as stack:
             ml2_provider = stack.enter_context(ML2GigaChatProvider(**kwargs))

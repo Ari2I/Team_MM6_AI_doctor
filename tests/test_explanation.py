@@ -5,13 +5,16 @@ from llm_rag.evidence_snapshot import verify_ml2_evidence
 from tests.test_evidence_snapshot import sample
 
 
-def test_proposal_is_not_approved_and_dosage_does_not_block():
+def test_clinical_category_is_displayed_without_requiring_corpus():
     inp, snap = sample()
     result = explain_pair(inp, verify_ml2_evidence(inp, snap))
     assert result.category == 'А'
     assert result.classification_basis == 'ML2_PROPOSAL'
     assert result.evidence_status == 'VERIFIED'
-    assert 'категория требует сверки' in result.comment
+    assert 'ML-2 присвоил категорию А' in result.comment
+    assert 'по текстовому снимку' in result.comment
+    assert 'предлагает' not in result.comment
+    assert 'категория требует сверки' not in result.comment
     assert 'Дозировка не оценивалась' in result.comment
     assert 'dosage' not in result.missing_context
     assert result.dosage_check == inp.dosage_check

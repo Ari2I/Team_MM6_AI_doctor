@@ -11,7 +11,7 @@ STATUS_REASONS = {
     'INN_UNRESOLVED': 'МНН не установлен; необходимо уточнить препарат.',
     'MULTI_INGREDIENT_REVIEW': 'Комбинированный состав требует ручной сверки.',
     'CONFLICT': 'ML-2 сообщил о конфликте оснований.',
-    'NEEDS_REVIEW': 'Предложение ML-2 требует дополнительной сверки.',
+    'NEEDS_REVIEW': 'Результат ML-2 требует дополнительной сверки.',
     'INVALID_RESPONSE': 'Ответ классификатора не прошёл проверку формата.',
     'SOURCE_ERROR': 'Источник ML-2 недоступен; применимость не установлена.',
     'PROVIDER_ERROR': 'Техническая ошибка провайдера ML-2.',
@@ -47,7 +47,9 @@ def explain_pair(input: ExplanationInput, evidence: VerifiedEvidence, *,
     if basis == 'APPROVED_RULE':
         text = f'Найдено применимое согласованное основание для исходной категории {input.category}.'
     elif input.category:
-        text = f'ML-2 предлагает категорию {input.category}; категория требует сверки.'
+        text = f'ML-2 присвоил категорию {input.category} по действующим правилам классификации.'
+        if status == 'VERIFIED':
+            text += ' Цитаты и их происхождение проверены по текстовому снимку источника.'
     else:
         text = 'Категория ML-2 не установлена; требуется ручная сверка.'
     if reasons:

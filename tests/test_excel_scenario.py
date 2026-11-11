@@ -128,7 +128,15 @@ def test_malformed_xml_is_rejected_and_file_is_closed(tmp_path):
 
 
 @pytest.mark.parametrize('tls_args,verify', [([], False), (['--verify-ssl'], True)])
-def test_bad_file_does_not_prevent_processing_good_file(tmp_path, monkeypatch, tls_args, verify):
+@pytest.mark.parametrize('file_scope,environment_scope,expected_scope', [
+    (None, None, 'GIGACHAT_API_B2B'),
+    ('GIGACHAT_API_PERS', None, 'GIGACHAT_API_PERS'),
+    ('GIGACHAT_API_B2B', 'GIGACHAT_API_PERS', 'GIGACHAT_API_PERS'),
+    ('GIGACHAT_API_PERS', 'GIGACHAT_API_B2B', 'GIGACHAT_API_B2B'),
+])
+def test_bad_file_does_not_prevent_processing_good_file(
+    tmp_path, monkeypatch, tls_args, verify, file_scope, environment_scope, expected_scope
+):
     import importlib.util
     import json
     from types import SimpleNamespace
@@ -146,7 +154,11 @@ def test_bad_file_does_not_prevent_processing_good_file(tmp_path, monkeypatch, t
     raw = CARD.read_bytes()
     (inbox / '02_good.xlsx').write_bytes(raw)
     monkeypatch.setattr(checker, 'RegistrySnapshot', SimpleNamespace(load=lambda p: SimpleNamespace(version='test', registrations=[])))
-    monkeypatch.setattr(checker, 'dotenv_values', lambda *a, **kw: {})
+    monkeypatch.setattr(checker, 'dotenv_values', lambda *a, **kw:
+        {'GIGACHAT_SCOPE': file_scope} if file_scope else {})
+    monkeypatch.delenv('GIGACHAT_SCOPE', raising=False)
+    if environment_scope:
+        monkeypatch.setenv('GIGACHAT_SCOPE', environment_scope)
     provider_options = []
     class Provider:
         def __init__(self, **kwargs):
@@ -173,6 +185,7 @@ def test_bad_file_does_not_prevent_processing_good_file(tmp_path, monkeypatch, t
     assert checker.main(['--input-dir', str(inbox), '--output-dir', str(tmp_path / 'reports'), '--registry', str(registry), *tls_args]) == 2
     assert len(provider_options) == 2
     assert all(options['verify_ssl_certs'] is verify for options in provider_options)
+    assert all(options['scope'] == expected_scope for options in provider_options)
     records = list((tmp_path / 'reports').glob('*/001/result.json'))
     assert len(records) == 1
     assert json.loads(records[0].read_text(encoding='utf-8'))['input_sha256'] == sha256(raw).hexdigest()
@@ -191,7 +204,8 @@ def test_report_escapes_input_and_keeps_unknown_visible(tmp_path):
     assert '<script>' not in html
     assert '&lt;script&gt;' in html
     assert 'Неизвестная сумма' in html
-    assert 'требует сверки' in html
+    assert 'Классификация по клиническим рекомендациям' in html
+    assert 'предварительн' not in html.casefold()
 
 
 def test_quotes_appear_once_with_one_source_heading(tmp_path):

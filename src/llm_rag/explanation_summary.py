@@ -54,7 +54,8 @@ def summarize_explanations(pairs: list[PairExplanation], *,
             raise ValueError('Деньги относятся к неизвестной покупке')
         amounts[key] = purchase
     unresolved = [pair_key(p) for p in pairs
-                  if p.evidence_status != 'VERIFIED' or p.classification_basis != 'APPROVED_RULE']
+                  if p.evidence_status != 'VERIFIED' or p.category is None
+                  or p.ml2_status != 'PROPOSED' or p.missing_context]
     costs, unknown = [], []
     for key in by_purchase:
         if key not in amounts or amounts[key].amount is None:

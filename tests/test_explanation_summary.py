@@ -26,7 +26,7 @@ def test_purchase_once_across_diagnoses_and_unknown_separately():
     assert costs.unknown_amount_count == 1
     assert costs.amounts_by_upstream_category['А'] == Decimal('12.50')
     assert len(result.summary_refs) == 3
-    assert len(result.unresolved_pair_ids) == 3
+    assert result.unresolved_pair_ids == []
     assert result.requires_review
     assert 'компенсации не' in result.summary_text
 
@@ -46,3 +46,18 @@ def test_duplicate_purchases_rejected_and_missing_amount_not_zero():
         summarize_explanations([p], purchases=[amount, amount])
     result = summarize_explanations([p], purchases=[])
     assert result.purchases_without_amount == [['r', 'i']]
+
+
+@pytest.mark.parametrize("changes", [
+    {"evidence_status": "UNCONFIRMED"},
+    {"evidence_status": "SOURCE_CONFLICT"},
+    {"evidence_status": "INSUFFICIENT_DATA"},
+    {"evidence_status": "PROCESSING_ERROR"},
+    {"category": None, "classification_basis": "NONE"},
+    {"ml2_status": "NEEDS_REVIEW"},
+    {"missing_context": ["context.age"]},
+])
+def test_only_verified_completed_classifications_leave_unresolved(changes):
+    unresolved = pair().model_copy(update=changes)
+    result = summarize_explanations([unresolved], purchases=[])
+    assert len(result.unresolved_pair_ids) == 1
