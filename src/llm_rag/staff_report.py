@@ -5,7 +5,7 @@ import json
 from typing import Literal
 
 from llm_rag.contracts import Model, Text
-from llm_rag.explanation_contracts import pair_key
+from llm_rag.explanation_contracts import missing_context_label, pair_key
 from llm_rag.validation import GeneratedResponse
 
 
@@ -78,6 +78,13 @@ def recommend_for_staff(inputs, pairs, *, provider=None):
             add('Возраст в заявке не указан. Возрастные рекомендации нельзя автоматически переносить на заявителя; если возраст недоступен, оставьте этот вопрос специалисту.',
                 'Не выбирайте детскую или взрослую рекомендацию без возраста. При отсутствии этих данных попросите специалиста проверить применимость.')
         if pair.missing_context:
+            # Только фиксированные ограничения попадают в разрешённые действия;
+            # произвольные значения контекста заявки модели не передаются.
+            for marker in ('clinical_applicability', 'citation_age_applicability'):
+                if marker in pair.missing_context:
+                    label = missing_context_label(marker)
+                    add(f'Передайте специалисту на сверку: {label}.',
+                        f'Учитывайте ограничение при ручной проверке: {label}.')
             add('Недостающие условия перечислены в карточке позиции. Уточните доступные сведения, остальные вопросы передайте специалисту.',
                 'Проверьте список недостающих сведений у позиции и передайте неразрешённые вопросы специалисту.')
         add('Передайте позицию и приведённые основания профильному специалисту; решение о выплате по этому отчёту не принимается.',

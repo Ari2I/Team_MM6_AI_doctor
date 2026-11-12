@@ -87,3 +87,28 @@ def test_dosage_only_rule_does_not_require_weight_for_category():
     assert result.status == 'VERIFIED'
     assert result.approved_claims
     assert not result.missing_context
+
+
+def test_incompatible_alternative_rule_does_not_require_its_missing_context():
+    from llm_rag.corpus import Corpus
+    from llm_rag.explanation import explain_pair
+
+    inp, snap = sample()
+    inp.context = {'age_group': 'adult'}
+    assertion = dict(claim_id='adult', kind='CATEGORY', category='А', dosage_status=None,
+        dosage=None, upstream_reason='Правило', text='Разрешённый текст.', quote='Разрешённый текст.')
+    adult = dict(fragment_id='f', source_id='s', location='§1', inn='МНН', diagnosis='Диагноз',
+        required_context={'age_group': 'adult'}, text='Разрешённый текст.', assertions=[assertion])
+    child = dict(adult, fragment_id='child', required_context={'age_group': 'child', 'weight': '20'},
+        assertions=[dict(assertion, claim_id='child')])
+    corpus = Corpus.model_validate(dict(corpus_version='c1', is_demo=True,
+        sources=[dict(source_id='s', title='Источник', source_type='PROTOCOL', version='2026', is_demo=True)],
+        fragments=[adult, child]))
+
+    evidence = verify_ml2_evidence(inp, snap, approved_corpus=corpus)
+    result = explain_pair(inp, evidence)
+
+    assert result.evidence_status == 'VERIFIED'
+    assert result.classification_basis == 'APPROVED_RULE'
+    assert result.missing_context == []
+    assert [claim.claim_id for claim in evidence.approved_claims] == ['adult']

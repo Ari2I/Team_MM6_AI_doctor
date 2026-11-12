@@ -39,3 +39,17 @@ def test_wrong_pair_evidence_rejected():
     evidence.item_id = 'other'
     with pytest.raises(ValueError):
         explain_pair(inp, evidence)
+
+
+@pytest.mark.parametrize('marker,label', [
+    ('clinical_applicability', 'применимость клинических условий независимо не проверена'),
+    ('citation_age_applicability', 'возрастные условия цитаты требуют отдельной сверки'),
+])
+def test_missing_applicability_markers_have_russian_comments_but_keep_machine_keys(marker, label):
+    inp, snap = sample()
+    inp.missing_context = [marker]
+    result = explain_pair(inp, verify_ml2_evidence(inp, snap))
+    assert result.missing_context == [marker]
+    assert label in result.comment
+    assert marker not in result.comment
+    assert result.evidence_status == 'INSUFFICIENT_DATA'

@@ -7,6 +7,7 @@ import httpx
 from gigachat.exceptions import GigaChatException, ResponseError
 from gigachat.models import Chat
 from pydantic import ValidationError
+from jsonschema import Draft202012Validator
 
 from llm_rag.providers.base import ProviderError
 from llm_rag.providers.gigachat import GigaChatProvider
@@ -87,7 +88,11 @@ class ML2GigaChatProvider(GigaChatProvider):
                 raise ProviderError("GIGACHAT_INVALID_COMPLETION")
             if len(message.content.encode("utf-8")) > 1_000_000:
                 raise ProviderError("GIGACHAT_RESPONSE_TOO_LARGE")
-            return _json_object(message.content)
+            result = _json_object(message.content)
+            # response_format сервера не заменяет независимую локальную проверку.
+            if not Draft202012Validator(schema).is_valid(result):
+                raise ProviderError("GIGACHAT_INVALID_RESPONSE")
+            return result
         except httpx.TimeoutException:
             raise ProviderError("GIGACHAT_TIMEOUT") from None
         except httpx.HTTPError as error:

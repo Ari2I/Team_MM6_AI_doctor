@@ -1,6 +1,6 @@
 """Резюме для сверки и независимые денежные разрезы по уникальным покупкам."""
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Literal
 
 from pydantic import Field
@@ -61,26 +61,35 @@ def summarize_explanations(pairs: list[PairExplanation], *,
         if key not in amounts or amounts[key].amount is None:
             unknown.append(list(key))
     for currency in sorted({p.currency for p in purchases}):
-        total, review, count = Decimal('0'), Decimal('0'), 0
-        categories, diagnoses = {}, {}
-        for key, purchase in amounts.items():
-            if purchase.currency != currency:
-                continue
-            if purchase.amount is None:
-                count += 1
-                continue
-            amount = purchase.amount
-            total += amount
-            related = by_purchase[key]
-            if any(p.requires_review for p in related):
-                review += amount
-            for category in {p.category or 'НЕ УСТАНОВЛЕНА' for p in related}:
-                categories[category] = categories.get(category, Decimal('0')) + amount
-            for diagnosis in {p.diagnosis_id for p in related}:
-                diagnoses[diagnosis] = diagnoses.get(diagnosis, Decimal('0')) + amount
-        costs.append(ExplanationCosts(currency=currency, known_total_amount=total,
-            unknown_amount_count=count, amounts_by_upstream_category=categories,
-            amount_requiring_review=review, amounts_by_diagnosis=diagnoses))
+        selected = [(key, p) for key, p in amounts.items() if p.currency == currency]
+        known = [p.amount for _, p in selected if p.amount is not None]
+        # Точность зависит от разрядов входных сумм и запаса для переноса при сложении.
+        # Локальный контекст сохраняет настройки вызывающего кода.
+        highest_place = max((amount.adjusted() for amount in known), default=0)
+        lowest_place = min((amount.as_tuple().exponent for amount in known), default=0)
+        precision = max(28, highest_place - lowest_place + 1 + len(str(len(known))) + 4)
+        with localcontext() as context:
+            context.prec = precision
+            context.Emin = min(context.Emin, lowest_place)
+            context.Emax = max(context.Emax, highest_place + len(str(len(known))) + 4)
+            total, review, count = Decimal('0'), Decimal('0'), 0
+            categories, diagnoses = {}, {}
+            for key, purchase in selected:
+                if purchase.amount is None:
+                    count += 1
+                    continue
+                amount = purchase.amount
+                total += amount
+                related = by_purchase[key]
+                if any(p.requires_review for p in related):
+                    review += amount
+                for category in {p.category or 'НЕ УСТАНОВЛЕНА' for p in related}:
+                    categories[category] = categories.get(category, Decimal('0')) + amount
+                for diagnosis in {p.diagnosis_id for p in related}:
+                    diagnoses[diagnosis] = diagnoses.get(diagnosis, Decimal('0')) + amount
+            costs.append(ExplanationCosts(currency=currency, known_total_amount=total,
+                unknown_amount_count=count, amounts_by_upstream_category=categories,
+                amount_requiring_review=review, amounts_by_diagnosis=diagnoses))
     lines = ['Резюме для секретаря. Суммы отражают расходы и исходные категории; размер компенсации не определяется.',
         'Разрезы категорий, диагнозов и ручной сверки могут пересекаться и не складываются между собой.',
         'Общие расходы учитывают каждую покупку один раз отдельно по валютам; неизвестные суммы не заменены нулём.']

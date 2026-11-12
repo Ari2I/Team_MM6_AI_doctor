@@ -94,6 +94,18 @@ def main(argv: list[str] | None = None) -> int:
         fragments = None
         if args.fragments:
             raw = read_json(args.fragments)
+            if not isinstance(raw, dict) or any(
+                not isinstance(inn, str) or not inn.strip() or not isinstance(rows, list)
+                or any(not isinstance(row, dict) for row in rows)
+                for inn, rows in raw.items()
+            ):
+                raise ValueError("Фрагменты должны быть объектом МНН -> список фрагментов")
+            if any(
+                not isinstance(value, str) or not value.strip()
+                for rows in raw.values() for row in rows for key, value in row.items()
+                if key != "copy_url" or value is not None
+            ):
+                raise ValueError("Идентификаторы и текст фрагментов должны быть непустыми строками")
             fragments = {
                 inn: tuple(EvidenceFragment(**row) for row in rows)
                 for inn, rows in raw.items()

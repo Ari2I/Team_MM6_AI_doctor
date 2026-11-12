@@ -120,11 +120,83 @@ def _role_supported(inn: str, quote: str, rule) -> bool:
             r"(?<!\w)" + ingredient + r"[а-я]{0,3}(?!\w)", clause
         ):
             continue
+        # Рекомендация комбинации не доказывает самостоятельную роль компонента.
+        combined = (
+            ingredient + r"[а-я]{0,3}\s*[*#]*\s*(?:[+/]|(?:в\s+)?(?:комбинац|сочетан)\w*\s+с\b)"
+            + r"|\w+\s*[*#]*\s*[+/]\s*" + ingredient + r"[а-я]{0,3}"
+            + r"|комбинац\w*\s+" + ingredient + r"[а-я]{0,3}\s+(?:и|с)\b"
+        )
+        if re.search(combined, clause, re.IGNORECASE):
+            continue
         if any(re.search(pattern, clause, re.IGNORECASE) for pattern in rule.reject_patterns):
             continue
         if any(re.search(pattern, clause, re.IGNORECASE) for pattern in rule.quote_patterns):
             return True
     return False
+
+
+def _membership_usable(quote: str, rule) -> bool:
+    """Не использовать исключение или запрет как положительную связь с группой."""
+    text = quote.casefold().replace("ё", "е")
+    return not re.search(
+        r"\b(?:не|без|после|кроме)\b|до назначения|взаимодейств|\+|исключа|противопоказ", text
+    ) and not any(re.search(pattern, text, re.IGNORECASE) for pattern in rule.reject_patterns)
+
+
+def _citation(fragment: EvidenceFragment, quote: str) -> Citation:
+    return Citation(fragment.fragment_id, fragment.source_id, fragment.title,
+                    fragment.version, fragment.url, fragment.location, quote, fragment.copy_url)
+
+
+def _group_support(request: ClassificationRequest, citation: Citation, rule) -> tuple[Citation, ...]:
+    """Связать группу с МНН только явной разметкой того же источника и редакции.
+
+    Медицинского словаря принадлежности здесь нет. Для неизвестной связи нужна
+    ручная проверка. Каждая найденная связь сохраняется отдельной точной цитатой.
+    """
+    ingredient = re.escape(inn_key(request.inn)).replace(r"\ ", r"\s+")
+    ingredient = r"(?<!\w)" + ingredient + r"[а-я]{0,3}(?!\w)"
+    source_quotes = [
+        (fragment, quote)
+        for fragment in request.fragments
+        if (fragment.source_id, fragment.version, fragment.url) == (
+            citation.source_id, citation.version, citation.url)
+        for quote in _quote_options(fragment.text)
+        if _membership_usable(quote, rule)
+    ]
+    groups = re.findall(r"(?<!\w)[А-ЯA-Z][А-ЯA-Z0-9]{2,11}(?!\w)", citation.quote)
+    for group in groups:
+        if not _role_supported(group, citation.quote, rule):
+            continue
+        escaped = re.escape(group)
+        for fragment, quote in source_quotes:
+            normalized = quote.casefold().replace("ё", "е")
+            listed = re.search(escaped + r"\s*\(([^()]*)\)", quote, re.IGNORECASE)
+            explicit = re.search(ingredient + r"\s+(?:относится|относят)\s+к\s+группе\s+"
+                                 + escaped + r"(?!\w)", normalized, re.IGNORECASE)
+            if (listed and re.search(ingredient, listed[1].casefold())) or explicit:
+                return (_citation(fragment, quote),)
+        # АТХ задаёт иерархию кодов: принадлежность берём из кода самого МНН,
+        # а код группы — из её определения в этой же сохранённой редакции.
+        for definition, definition_quote in source_quotes:
+            group_code = re.search(
+                r"(?<!\w)" + escaped + r"\s*[,()]?\s*(?:группа\s+)?(?:код\s+)?АТХ\s*:?\s*"
+                r"([A-ZА-Я][0-9]{2}[A-ZА-Я]{1,2})(?![A-ZА-Я0-9])",
+                definition_quote, re.IGNORECASE)
+            if not group_code:
+                continue
+            from .registry import canonical_code
+
+            prefix = canonical_code(group_code[1])
+            for fragment, quote in source_quotes:
+                drug_code = re.search(
+                    ingredient + r"\s*[*#]*\s*\(\s*(?:код\s+)?АТХ\s*:?\s*"
+                    r"([A-ZА-Я][0-9]{2}[A-ZА-Я]{2}[0-9]{2})(?!\w)",
+                    quote, re.IGNORECASE)
+                if drug_code and canonical_code(drug_code[1]).startswith(prefix):
+                    return tuple(dict.fromkeys((_citation(definition, definition_quote),
+                                                _citation(fragment, quote))))
+    return ()
 
 
 def _quote_options(text: str) -> list[str]:
@@ -133,8 +205,6 @@ def _quote_options(text: str) -> list[str]:
         for part in re.split(r"(?<=[.!?])\s+", text)
         if part.strip() and len(part.strip()) <= 3000
     ]
-    if not options and text:
-        options = [text[:3000].strip()]
     return list(dict.fromkeys(options[:20]))
 
 
@@ -154,6 +224,8 @@ def prompt_for(request: ClassificationRequest) -> tuple[str, str]:
         raise ValueError("fragment_id должен быть уникальным в одном запросе.")
     if any(not fragment.text.strip() for fragment in request.fragments):
         raise ValueError("Пустые фрагменты нельзя отправлять модели.")
+    if sum(len(fragment.text) for fragment in request.fragments) > 60000:
+        raise ValueError("Общий размер фрагментов превышает 60000 символов.")
 
     payload = {
         "diagnosis": request.diagnosis,
@@ -172,7 +244,11 @@ def prompt_for(request: ClassificationRequest) -> tuple[str, str]:
             for fragment in request.fragments
         ],
     }
-    return SYSTEM_PROMPT, json.dumps(payload, ensure_ascii=False)
+    user_json = json.dumps(payload, ensure_ascii=False)
+    if len(SYSTEM_PROMPT) + len(user_json) > 140000:
+        # Варианты цитат дублируют текст, поэтому учитываем весь готовый запрос.
+        raise ValueError("Общий размер запроса модели превышает допустимый бюджет.")
+    return SYSTEM_PROMPT, user_json
 
 
 def gigachat_completer(provider) -> Callable[[str, str], Mapping[str, object]]:
@@ -282,6 +358,10 @@ def validate_response(
         or not isinstance(raw_evidence, list)
     ):
         raise InvalidModelResponse("Некорректные типы полей ответа.")
+    if (len(conditions) > 20 or len(missing) > 20 or len(raw_evidence) > 20
+            or any(not x.strip() or len(x) > 500 for x in conditions)
+            or any(not x.strip() or len(x) > 200 for x in missing)):
+        raise InvalidModelResponse("Превышены ограничения полей ответа.")
 
     fragments = {fragment.fragment_id: fragment for fragment in request.fragments}
     citations: list[Citation] = []
@@ -296,20 +376,9 @@ def validate_response(
         ):
             raise InvalidModelResponse("Пустая ссылка или цитата.")
         fragment = fragments.get(fragment_id)
-        if fragment is None or quote not in fragment.text:
-            raise InvalidModelResponse("Цитата не найдена в переданном источнике.")
-        citations.append(
-            Citation(
-                fragment_id=fragment.fragment_id,
-                source_id=fragment.source_id,
-                title=fragment.title,
-                version=fragment.version,
-                url=fragment.url,
-                location=fragment.location,
-                quote=quote,
-                copy_url=fragment.copy_url,
-            )
-        )
+        if fragment is None or quote not in _quote_options(fragment.text):
+            raise InvalidModelResponse("Цитата не совпадает с разрешённым полным предложением источника.")
+        citations.append(_citation(fragment, quote))
 
     if assessment == Assessment.NOT_FOUND and citations:
         raise InvalidModelResponse("Для NOT_FOUND модель не должна возвращать цитаты.")
@@ -332,11 +401,23 @@ def validate_response(
     assessment_note = None
     if rule.category and missing:
         assessment = Assessment.INSUFFICIENT_CONTEXT
-    elif rule.category and not any(
-        _role_supported(request.inn, citation.quote, rule) for citation in citations
-    ):
-        assessment = Assessment.MENTIONED_ONLY
-        assessment_note = "Цитаты не прошли проверку роли по рабочим правилам классификации."
+    elif rule.category:
+        grounded = False
+        membership = []
+        for citation in citations:
+            if _role_supported(request.inn, citation.quote, rule):
+                grounded = True
+                break
+            linked = _group_support(request, citation, rule)
+            if linked:
+                grounded = True
+                membership.extend(linked)
+                break
+        if grounded:
+            citations = list(dict.fromkeys((*citations, *membership)))
+        else:
+            assessment = Assessment.MENTIONED_ONLY
+            assessment_note = "Цитаты не прошли проверку роли и принадлежности МНН по рабочим правилам."
 
     category = _RULES.assessments[assessment.value].category
     if assessment == Assessment.NOT_FOUND:
@@ -438,7 +519,7 @@ def classify_purchase(
     complete_json: Callable[[str, str], str | Mapping[str, object]],
     evidence_fragments: tuple[EvidenceFragment, ...] = (),
 ) -> ClassificationResult:
-    """Сопоставить МНН по локальному ГРЛС и оценить переданные фрагменты КР."""
+    """Совместимый публичный вызов одной покупки без ML2Pipeline и live-источников."""
     drug = RegistryIndex(snapshot).resolve(trade_name, dosage)
     registry_citations = tuple(
         Citation(

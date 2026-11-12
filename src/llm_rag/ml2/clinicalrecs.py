@@ -59,6 +59,19 @@ class ClinicalSourceError(ValueError):
     """Невозможно безопасно использовать страницу клинической рекомендации."""
 
 
+def _require_source_https(url) -> None:
+    """Проверить адрес до сетевого запроса, включая каждый переход."""
+    parsed = urlsplit(str(url))
+    host = (parsed.hostname or '').encode('idna').decode('ascii').casefold()
+    if (parsed.scheme != 'https' or host != SOURCE_HOST
+            or parsed.port is not None or parsed.username or parsed.password):
+        raise ClinicalSourceError('Источник перенаправлен за пределы доверенного HTTPS-адреса.')
+
+
+def _check_source_request(request) -> None:
+    _require_source_https(request.url)
+
+
 @dataclass(frozen=True)
 class TreatmentSegment:
     locator: str
@@ -188,10 +201,12 @@ def recommendations_for_diagnosis(
                 headers=headers,
                 timeout=httpx.Timeout(20, read=45),
                 follow_redirects=True,
+                event_hooks={'request': [_check_source_request]},
             ) as client:
                 if not _robots_allows(client, BASE_URL + "/"):
                     raise ClinicalSourceError("robots.txt запрещает загрузку каталога.")
                 response = client.get(BASE_URL + "/")
+                _require_source_https(response.url)
                 if response.status_code == 304 and cached:
                     stale = False
                     html = cached["html"]
@@ -592,6 +607,7 @@ def _read_cache(html_path: Path, meta_path: Path) -> tuple[str, dict] | None:
 def _robots_allows(client: httpx.Client, page_url: str) -> bool:
     robots_url = f"{BASE_URL}/robots.txt"
     response = client.get(robots_url)
+    _require_source_https(response.url)
     response.raise_for_status()
     parser = RobotFileParser(robots_url)
     parser.parse(response.text.splitlines())
@@ -631,13 +647,15 @@ def fetch_recommendation(
             headers["If-Modified-Since"] = metadata["last_modified"]
     try:
         with httpx.Client(
-            headers=headers, timeout=httpx.Timeout(20, read=45), follow_redirects=True
+            headers=headers, timeout=httpx.Timeout(20, read=45), follow_redirects=True,
+            event_hooks={'request': [_check_source_request]},
         ) as client:
             if not _robots_allows(client, page_url):
                 raise ClinicalSourceError(
                     "robots.txt запрещает загрузку этой страницы."
                 )
             with client.stream("GET", page_url) as response:
+                _require_source_https(response.url)
                 if response.status_code == 304 and cached:
                     html, metadata = cached
                     metadata["checked_at"] = now.isoformat()
@@ -702,7 +720,11 @@ def fragments_for_inn(
     max_fragments: int = 20,
     window_chars: int = 3000,
 ) -> tuple[EvidenceFragment, ...]:
-    """Вернуть окна по МНН с контекстом условий и роли, оригинальной ссылкой и копией."""
+    """Вернуть первые max_fragments окон по МНН, без обрезания предложений.
+
+    Поиск ограничен первыми 20 окнами: это подбор материалов для сверки,
+    а не доказательство полноты рекомендаций или отсутствия противопоказаний.
+    """
 
     if not recommendation.is_current_ministry_copy:
         return ()
@@ -724,22 +746,31 @@ def fragments_for_inn(
     seen: set[str] = set()
     for segment in recommendation.segments:
         searchable = segment.text.replace("ё", "е").replace("Ё", "Е")
-        spans: list[tuple[int, int]] = []
-        for pattern in patterns:
-            for match in pattern.finditer(searchable):
-                spans.append(
-                    (
-                        max(0, match.start() - window_chars // 2),
-                        min(len(segment.text), match.end() + window_chars // 2),
-                    )
-                )
-        merged: list[list[int]] = []
-        for start, end in sorted(spans):
-            if merged and start <= merged[-1][1]:
-                merged[-1][1] = max(merged[-1][1], end)
-            else:
-                merged.append([start, end])
-        for start, end in merged:
+        # Не вырезаем начало предложения с отрицанием или условием и не
+        # объединяем цепочку упоминаний в неограниченный раздел лечения.
+        sentences = [(m.start(), m.end()) for m in re.finditer(
+            r'\S.*?(?:[.!?](?=\s|$)|$)', searchable, re.DOTALL)]
+        windows = []
+        for index, (start, end) in enumerate(sentences):
+            if not any(p.search(searchable[start:end]) for p in patterns):
+                continue
+            if end - start > window_chars:
+                # Длинное предложение целиком не помещается: обрезанная
+                # медицинская формулировка не используется как основание.
+                raise ClinicalSourceError('Предложение с МНН превышает предел безопасного контекста; требуется ручная сверка источника.')
+            left, right = index, index
+            while left > 0 and end - sentences[left - 1][0] <= window_chars:
+                left -= 1
+                start = sentences[left][0]
+            while right + 1 < len(sentences) and sentences[right + 1][1] - start <= window_chars:
+                right += 1
+                end = sentences[right][1]
+            windows.append((start, end))
+        for start, end in windows:
+            if len(found) >= max_fragments:
+                # Квота ограничивает выдачу, но оставшиеся сегменты всё равно
+                # проверяются: нельзя скрыть длинное противопоказание за квотой.
+                break
             quote = segment.text[start:end].strip()
             fragment_id = sha256(
                 f"{recommendation.primary_url}\0{segment.locator}\0{start}\0{quote}".encode()
@@ -759,6 +790,4 @@ def fragments_for_inn(
                     copy_url=recommendation.page_url,
                 )
             )
-            if len(found) >= max_fragments:
-                return tuple(found)
     return tuple(found)

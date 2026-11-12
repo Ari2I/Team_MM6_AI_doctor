@@ -72,10 +72,12 @@ def verify_ml2_evidence(input: ExplanationInput, snapshot: EvidenceSnapshot, *,
     docs = {(d.source_id, d.fragment_id, d.version): d for d in snapshot.documents}
 
     def conditions(required):
+        # Известное несовпадение исключает правило, даже если другие условия неизвестны.
+        if any(k in input.context and input.context[k] != v for k, v in required.items()):
+            return False
         absent = {f'context.{k}' for k in required if k not in input.context}
         missing.update(absent)
-        mismatch = any(k in input.context and input.context[k] != v for k, v in required.items())
-        return not absent and not mismatch
+        return not absent
 
     for condition in input.conditions:
         if normalize(condition) == normalize(input.diagnosis):

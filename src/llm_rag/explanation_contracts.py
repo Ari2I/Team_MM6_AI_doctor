@@ -55,6 +55,14 @@ def pair_key(value: PairKey) -> str:
     return json.dumps([value.request_id, value.item_id, value.diagnosis_id], ensure_ascii=False)
 
 
+def missing_context_label(value: str) -> str:
+    """Назвать служебные ограничения понятным языком, сохранив машинные ключи отдельно."""
+    return {
+        'clinical_applicability': 'применимость клинических условий независимо не проверена',
+        'citation_age_applicability': 'возрастные условия цитаты требуют отдельной сверки',
+    }.get(value, value)
+
+
 class PairExplanation(PairKey):
     schema_version: Literal['explanation.1'] = 'explanation.1'
     category: Category | None

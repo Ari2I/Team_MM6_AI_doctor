@@ -148,3 +148,20 @@ def test_unverified_evidence_never_gets_success_recommendation(status):
     report = recommend_for_staff([inp], [pair])
     text = " ".join(report.recommendations[0].actions)
     assert "Категория А присвоена" not in text
+
+
+@pytest.mark.parametrize('variant', [None, 'variant'])
+def test_staff_actions_name_unverified_clinical_and_age_conditions_in_russian(variant):
+    inp, snap = sample()
+    inp.missing_context = ['clinical_applicability', 'citation_age_applicability']
+    inp.context = {'age': '45', 'secret': 'PRIVATE'}
+    pair = explain_pair(inp, verify_ml2_evidence(inp, snap))
+    provider = ReportProvider(variant)
+    report = recommend_for_staff([inp], [pair], provider=provider)
+    text = ' '.join(report.recommendations[0].actions)
+    assert 'применимость клинических условий независимо не проверена' in text
+    assert 'возрастные условия цитаты требуют отдельной сверки' in text
+    assert 'clinical_applicability' not in text
+    assert 'citation_age_applicability' not in text
+    assert 'PRIVATE' not in str(provider.payload)
+    assert report.generation_status == 'MODEL'

@@ -1,7 +1,7 @@
 """Детерминированные пояснения без повторной классификации и решения о выплате."""
 
 from llm_rag.evidence_snapshot import VerifiedEvidence
-from llm_rag.explanation_contracts import ExplanationInput, PairExplanation, pair_key
+from llm_rag.explanation_contracts import ExplanationInput, PairExplanation, missing_context_label, pair_key
 from llm_rag.providers.base import Provider
 
 
@@ -55,7 +55,7 @@ def explain_pair(input: ExplanationInput, evidence: VerifiedEvidence, *,
     if reasons:
         text += ' ' + ' '.join(dict.fromkeys(reasons))
     if missing:
-        text += ' Недостающие сведения: ' + ', '.join(missing) + '.'
+        text += ' Недостающие сведения: ' + ', '.join(missing_context_label(key) for key in missing) + '.'
     text += (' Дозировка не оценивалась в этом режиме.' if not check_dosage else
              ' Переданный статус дозировки: ' + input.dosage_check.status + '.')
     text += ' Проверка основания не заменяет медицинскую приёмку; решение принимает специалист.'

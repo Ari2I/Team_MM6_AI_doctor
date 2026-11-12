@@ -22,7 +22,6 @@ from llm_rag.explanation_summary import summarize_explanations
 from llm_rag.ml2.classifier import gigachat_completer
 from llm_rag.ml2.clinicalrecs import fragments_for_inn
 from llm_rag.ml2.pipeline import ClinicalSources, ML2Pipeline
-from llm_rag.ml2.registry import RegistrySnapshot
 from llm_rag.providers.base import PROVIDER_ERROR_MESSAGES
 
 
@@ -74,8 +73,9 @@ def read_card(path: Path, *, content: bytes | None = None) -> ExcelCard:
         if not {'Заявка', 'Покупки'} <= set(book.sheetnames):
             raise ValueError('Нужны листы «Заявка» и «Покупки» по шаблону.')
         def values(sheet, columns, limit):
-            if sheet.max_row is not None and sheet.max_row > limit:
-                raise ValueError(f'Слишком много строк на листе «{sheet.title}».')
+            # Размеры в XML бывают устаревшими: проверяем реальные строки,
+            # иначе read_only молча отбросит покупки за заявленной границей.
+            sheet.reset_dimensions()
             for number, row in enumerate(sheet.iter_rows(max_col=columns), 1):
                 if number > limit:
                     raise ValueError(f'Слишком много строк на листе «{sheet.title}».')
@@ -198,6 +198,26 @@ class CallCounter:
         return self(payload)
 
 
+def _age_requires_review(quote, age):
+    """Отметить явные возрастные границы; это сигнал сверки, не медицинский разбор."""
+    if not age or not age.isdigit():
+        return False
+    years = int(age)
+    for low, high in re.findall(r'(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*(?:лет|год)', quote):
+        if not int(low) <= years <= int(high):
+            return True
+    for low, high in re.findall(r'от\s+(\d{1,3})\s+до\s+(\d{1,3})\s*(?:лет|год)', quote, re.IGNORECASE):
+        if not int(low) <= years <= int(high):
+            return True
+    for limit in re.findall(r'(?:до|младше)\s+(\d{1,3})\s*(?:лет|год)', quote, re.IGNORECASE):
+        if years >= int(limit):
+            return True
+    for limit in re.findall(r'старше\s+(\d{1,3})\s*(?:лет|год)', quote, re.IGNORECASE):
+        if years <= int(limit):
+            return True
+    return False
+
+
 def process_card(card, registry, sources, classifier, renderer):
     """Не менять ML-2: связать его полный результат с независимыми снимками."""
     batch = ML2Pipeline(registry, sources=sources, complete_json=classifier).run(card.request, live_sources=True)
@@ -205,6 +225,13 @@ def process_card(card, registry, sources, classifier, renderer):
     pairs, snapshots = [], []
     for input in inputs:
         snapshot = sources.snapshot(input)
+        if input.citations:
+            # Точное совпадение с КР не подтверждает клиническую применимость.
+            # Пока нет независимого разбора условий, сохраняем категорию ML-2
+            # и цитаты, но не выдаём VERIFIED для клинического результата.
+            input.missing_context = sorted(set(input.missing_context + ['clinical_applicability']))
+            if any(_age_requires_review(c.quote, input.context.get('age')) for c in input.citations):
+                input.missing_context = sorted(set(input.missing_context + ['citation_age_applicability']))
         if 'age' not in input.context and any(
                 re.search(r'возраст|\bлет\b|детям|детей|взросл', c.quote, re.IGNORECASE)
                 for c in input.citations):
@@ -255,6 +282,8 @@ def write_report(folder, name, app, usage, items, *, staff_report=None):
             'PROCESSING_ERROR': 'техническая ошибка проверки'}
         comment = p.comment
         for key, label in [('context.age_group', 'возрастная группа'), ('context.age', 'возраст заявителя'),
+                           ('citation_age_applicability', 'возрастные условия цитаты требуют отдельной сверки'),
+                           ('clinical_applicability', 'применимость клинических условий независимо не проверена'),
                            ('condition:', 'условие применимости:')]:
             comment = comment.replace(key, label)
         parts += ['<p>Исходная категория: ' + escape(p.category or 'не установлена') + '. Проверка: '

@@ -15,6 +15,9 @@ def calculate_costs(request: AnalysisRequest) -> list[CurrencyBreakdown]:
         precision = max(28, highest_place - lowest_place + 1 + len(str(len(items))) + 4)
         with localcontext() as context:
             context.prec = precision
+            # Не обнуляем допустимые малые суммы из-за стандартного диапазона экспонент.
+            context.Emin = min(context.Emin, lowest_place)
+            context.Emax = max(context.Emax, highest_place + len(str(len(items))) + 4)
             amounts = {key: Decimal("0") for key in ("А", "Б", "В", "UNCLASSIFIED")}
             for item in items:
                 amounts[item.category or "UNCLASSIFIED"] += item.original.amount

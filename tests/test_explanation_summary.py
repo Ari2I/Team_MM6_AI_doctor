@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -61,3 +61,29 @@ def test_only_verified_completed_classifications_leave_unresolved(changes):
     unresolved = pair().model_copy(update=changes)
     result = summarize_explanations([unresolved], purchases=[])
     assert len(result.unresolved_pair_ids) == 1
+
+
+def test_large_amounts_keep_exact_totals_in_every_breakdown_and_preserve_decimal_context():
+    first = pair()
+    large = '123456789012345678901234567890.01'
+    pairs = [first, first.model_copy(update={'diagnosis_id': 'd2'}),
+             first.model_copy(update={'item_id': 'i2', 'category': 'Б'}),
+             first.model_copy(update={'item_id': 'i3'})]
+    purchases = [PurchaseAmount(request_id='r', item_id='i', amount=large, currency='RUB'),
+                 PurchaseAmount(request_id='r', item_id='i2', amount='0.09', currency='RUB'),
+                 PurchaseAmount(request_id='r', item_id='i3', amount=None, currency='USD')]
+
+    with localcontext() as context:
+        context.prec = 6
+        result = summarize_explanations(pairs, purchases=purchases)
+        assert context.prec == 6
+
+    costs = {c.currency: c for c in result.costs_by_currency}
+    expected = Decimal('123456789012345678901234567890.10')
+    assert costs['RUB'].known_total_amount == expected
+    assert costs['RUB'].amount_requiring_review == expected
+    assert costs['RUB'].amounts_by_upstream_category == {'А': Decimal(large), 'Б': Decimal('0.09')}
+    assert costs['RUB'].amounts_by_diagnosis == {'d': expected, 'd2': Decimal(large)}
+    assert costs['USD'].known_total_amount == Decimal('0')
+    assert costs['USD'].unknown_amount_count == 1
+    assert result.purchases_without_amount == [['r', 'i3']]
