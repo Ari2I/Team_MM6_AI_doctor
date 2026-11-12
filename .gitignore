@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+.local/
+AGENTS.md
+AGENTS.override.md
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
