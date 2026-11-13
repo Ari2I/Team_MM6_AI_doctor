@@ -15,6 +15,7 @@ from app.models import (
     ReferenceVersion,
 )
 from app.schemas.analysis import ReferenceDiagnosis, ReferenceDrug, ReferenceRule, ReferenceSnapshot
+from app.services.ai_adapter import AIAdapter, AIInput
 from app.services.matching import match_diagnosis, match_drug
 from app.services.rules import check_pair, detect_conflicts, pairs_for_item
 from app.services.summary import (
@@ -68,6 +69,7 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
     if application is None:
         raise AnalysisError("Заявка не найдена.")
     try:
+        ai_adapter = AIAdapter()
         snapshot = _load_snapshot(session)
         diagnoses = list(application.diagnoses)
         diagnosis_names = [diagnosis.name for diagnosis in diagnoses]
@@ -93,6 +95,17 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
                     continue
                 diagnosis_match = match_diagnosis(diagnosis_name, snapshot)
                 pair_check = check_pair(drug_match, diagnosis_match, snapshot)
+                pair_check = ai_adapter.analyze(
+                    AIInput(
+                        drug_name=item.drug_name or "",
+                        mnn=drug_match.mnn,
+                        diagnosis=diagnosis_name,
+                        dosage=item.dosage,
+                        quantity=item.quantity,
+                        amount=item.amount,
+                    ),
+                    pair_check,
+                )
                 db_check = ItemCheck(
                     item_id=item.id,
                     diagnosis_id=diagnosis_row.id,

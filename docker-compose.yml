@@ -1,8 +1,8 @@
 services:
   api:
-    build: .
-    env_file:
-      - .env
+    build:
+      context: .
+      target: ${API_BUILD_TARGET:-template}
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
@@ -11,6 +11,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Укажите POSTGRES_PASSWORD в окружении}
       DOCS_ENABLED: ${DOCS_ENABLED:-${ENABLE_API_DOCS:-false}}
       LIST_ENDPOINT_ENABLED: ${LIST_ENDPOINT_ENABLED:-${ENABLE_APPLICATION_LIST:-false}}
+      AI_MODE: ${AI_MODE:-template}
+      AI_DEMO_DATA: ${AI_DEMO_DATA:-false}
+      AI_PAIR_TIMEOUT_SECONDS: ${AI_PAIR_TIMEOUT_SECONDS:-20}
+      AI_APPLICATION_TIMEOUT_SECONDS: ${AI_APPLICATION_TIMEOUT_SECONDS:-90}
+      AI_CURRENCY: ${AI_CURRENCY:-RUB}
+      GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-}
+      GIGACHAT_CA_BUNDLE_FILE: ${GIGACHAT_CA_BUNDLE_FILE:-}
     depends_on:
       db:
         condition: service_healthy

@@ -96,7 +96,8 @@ FastAPI/PostgreSQL принимает XLSX, сопоставляет препа�
 4. Загрузите `tests/data/sample_corrupt.xlsx`: ожидается ошибка файла.
 
 Справочник `data/reference/demo.json` демонстрационный, не клиническая истина.
-ИИ-модуль здесь не подключён, внешние LLM не вызываются.
+По умолчанию работает `AI_MODE=template`: внешние LLM не вызываются.
+Опциональное подключение библиотеки AI описано ниже.
 
 ### Общие синтетические данные backend и AI
 
@@ -154,7 +155,7 @@ docker compose exec -T api python -m app.scripts.import_reference data/reference
 Допущения: второй синтетический диагноз нужен только для отсутствующего правила;
 суммы, количества и торговые соответствия заданы для показа, а не взяты из медицины.
 Ожидания индикатора фиксируют текущие настройки backend. TODO: уточнить у аналитика
-правила yellow/red/undetermined и агрегацию нескольких диагнозов. Не решены адаптер AI,
+правила yellow/red/undetermined и агрегацию нескольких диагнозов. Не решены
 условные правила и совместимость API frontend; `ai/` и `frontend/` не изменяются.
 
 ## Smoke в чистой копии
@@ -242,8 +243,192 @@ docker compose exec -T -e RUN_POSTGRES_TESTS=1 -e ENABLE_APPLICATION_LIST=true a
 - Сроки хранения и удаление заявок.
 - Шифрование хранилища и резервных копий.
 - HTTPS для показа по сети: HTTP Basic Auth не шифрует соединение.
-- ИИ через backend-адаптер с шаблонным резервом.
+- Клиническая приёмка AI и отдельный согласованный контракт реальных данных.
 - Подтверждение аналитиком категорий и правил жёлтого/красного индикатора.
 
 API не хранит отдельного решения секретаря. В демонстрации используйте только
 вымышленные заявки; реальные названия препаратов служат метками синтетических данных.
+
+## Опциональный AI: template, offline, network
+
+Правило подключения — `ai/README.md`, раздел встраивания библиотеки:
+`Pipeline(corpus, provider, embedder=...)`, `AnalysisRequest` → `AnalysisResult`.
+Это синтетический демонстрационный интерфейс, не универсальный медицинский классификатор.
+Backend вызывает его отдельно для каждой пары после своих правил через
+`app/services/ai_adapter.py`; подтверждённые category/source/reference_version сохраняются.
+Дозировка, количество и сумма читаются для совместимости контракта, но не оцениваются.
+Дисклеймер о рекомендательном характере остаётся обязательным.
+
+| AI_MODE | Образ API (`API_BUILD_TARGET`) | Поведение |
+| --- | --- | --- |
+| `template` (default) | `template` (default) | Только backend-правила и шаблоны; модуль не импортируется |
+| `offline` | `ai-offline` | Локальные corpus, lexical retrieval и DemoProvider; сеть запрещена в worker |
+| `network` | `ai-network` | Тот же Pipeline с GigaChat, проверкой TLS и фильтром полей |
+
+Для двух последних режимов требуется `AI_DEMO_DATA=true` — явное подтверждение
+оператором, что загружаются только синтетические заявки. Иначе `AI_UNAVAILABLE`
+и шаблон с ручной проверкой. Нельзя молча помечать реальные заявки `is_demo=true`.
+Отсутствие модуля/ключа, ошибка или неподдерживаемая конфигурация также дают fallback.
+
+Запускайте через `python scripts/compose_ai.py ...`: обёртка всегда задаёт
+`--env-file` с пустым системным файлом и **не загружает `.env`**. Все необходимые
+переменные PostgreSQL и WEB_PORT должны быть заранее установлены в окружении хоста.
+Полный `env_file: .env` из api удалён: при необходимости другие настройки api
+нужно явно добавить в `environment` Compose. Обычный `docker compose` сам ищет
+`.env` для интерполяции; для режима «только окружение хоста» используйте обёртку.
+
+Пример PowerShell (секреты заранее задаются пользователем в окружении, без вывода):
+
+```powershell
+$env:AI_MODE = 'template'
+$env:API_BUILD_TARGET = 'template'
+python scripts/compose_ai.py up --build -d --wait
+
+$env:AI_MODE = 'offline'
+$env:API_BUILD_TARGET = 'ai-offline'
+$env:AI_DEMO_DATA = 'true'
+python scripts/compose_ai.py up --build -d --wait
+```
+
+На новой демо-БД примените миграции и один раз импортируйте demo-v2:
+
+```powershell
+python scripts/compose_ai.py exec -T api alembic upgrade head
+python scripts/compose_ai.py exec -T api python -m app.scripts.import_reference data/reference/demo-v2.json --activate
+```
+
+Для network оператор отдельно устанавливает `GIGACHAT_CREDENTIALS` и подходящий
+его доступу `GIGACHAT_SCOPE` в окружении хоста. Ключ **личный**: его нельзя
+коммитить, вставлять в команды, отчёты, Dockerfile или Compose-файлы.
+В Compose три настройки передаются исключительно как `${GIGACHAT_CREDENTIALS:-}`,
+`${GIGACHAT_SCOPE:-}`, `${GIGACHAT_CA_BUNDLE_FILE:-}` без встроенных значений.
+Пустой scope в Python использует библиотечный `GIGACHAT_API_PERS`; для B2B явно
+установите свой scope. Проверка сертификатов всегда включена, insecure-флага нет.
+
+CA возьмите по [инструкции GigaChat о сертификатах](https://developers.sber.ru/docs/ru/gigachat/certificates).
+Храните CA вне Git и контекста сборки. Если системное хранилище уже доверяет
+серверу, оставьте `GIGACHAT_CA_BUNDLE_FILE` пустым: bind mount не создаётся.
+На Linux задайте абсолютный путь к CA-файлу в этой переменной — обёртка смонтирует
+его по тому же пути read-only. Для Docker Desktop/Windows разделите хостовый
+и Linux-путь: переменная содержит `/run/certs/gigachat-ca.pem`, а
+`--ca-source C:/certs/gigachat-ca.pem` задаёт фактический внешний файл хоста.
+Опцию `--ca-source` повторяйте при каждой команде обёртки с заданным CA.
+Override содержит только пути, создаётся вне репозитория, удаляется после команды;
+ключей в нём нет. Отсутствующий файл не создаётся автоматически.
+
+Для постоянного подключения локального файла `certs/gigachat-ca.pem` используйте
+`docker-compose.certs.yml`. Папка `/certs` исключена из Git и контекста сборки.
+Этот override задаёт `GIGACHAT_CA_BUNDLE_FILE=/run/certs/gigachat-ca.pem` и
+подключает файл только для чтения. Исходный файл должен существовать: Docker
+не создаёт вместо него каталог. Режим AI override не меняет.
+
+Из корня проекта выполните в PowerShell:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.certs.yml up -d --no-deps --force-recreate --wait api
+docker exec proekt_prac_2-api-1 python -c "import os,ssl; p=os.environ['GIGACHAT_CA_BUNDLE_FILE']; c=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); c.load_verify_locations(cafile=p); print('CA path:',p); print('Certificates:',c.cert_store_stats()['x509'])"
+```
+
+Эти команды используют существующий образ API, пересоздают только API-контейнер
+и сохраняют том PostgreSQL. Как обычный Compose, первая команда использует
+переменные окружения хоста и `.env` для интерполяции настроек; перед запуском
+убедитесь, что это настройки текущего окружения. Повторяйте оба `-f` при следующих
+вызовах `docker compose ... up`, чтобы сохранить подключение CA. `docker compose
+restart api` не применяет новые mounts и environment.
+
+Для режима без чтения `.env` остаётся доступна обёртка `scripts/compose_ai.py`
+с `--ca-source` и настройками из окружения, описанная выше. Подключение CA само
+по себе не включает GigaChat: для сетевого режима нужны образ `ai-network`,
+настройки `AI_MODE=network`, `AI_DEMO_DATA=true` и авторизация. Публичные CA
+не заменяют ключ доступа.
+
+```powershell
+$env:AI_MODE = 'network'
+$env:API_BUILD_TARGET = 'ai-network'
+$env:AI_DEMO_DATA = 'true'
+# При необходимости CA задайте GIGACHAT_CA_BUNDLE_FILE и --ca-source, как описано выше.
+python scripts/compose_ai.py up --build -d --wait
+python scripts/compose_ai.py exec -T api python scripts/ai_network_check.py
+```
+
+`ai_network_check.py` запускается **только вручную**. Он использует первую пару
+из `data/demo/correct.xlsx` и demo-v2, делает один вызов Pipeline без повторов
+(у SDK отдельно есть OAuth-запрос) и печатает только status, elapsed_seconds,
+tokens (null, если неизвестно) и sent_fields. Содержимое запроса/ответа и ключ
+не печатаются. Поля фиксируются перед передачей провайдеру; это не подтверждение
+доставки серверу. При жёстком таймауте уже полученные счётчики сохраняются;
+пустой список означает, что передача провайдеру ещё не зарегистрирована.
+Скрипт не включён в тесты, smoke или startup.
+
+**Внешний allowlist:** `schema_version`, `is_demo`, `corpus_version`;
+`item.item_id` (константа `item`), `item.inn`, `item.diagnosis`, `item.category`;
+`evidence[]`: claim_id, kind (только CATEGORY), text, quote, fragment_id, source_id,
+source_title, source_version, location, fragment_text. Последние поля берутся из
+локального синтетического corpus, а не из заявки. SDK добавляет фиксированные
+инструкции, модель, настройки генерации и JSON-схему ответа; OAuth использует ключ/scope.
+Файл, имя файла, исходные UUID, торговое название, дозировка, количество, сумма,
+произвольные причины, context и персональные данные в LLM-payload не включаются.
+Исходный Pipeline payload с original_dosage/dosage_check наружу не передаётся.
+
+По умолчанию `AI_PAIR_TIMEOUT_SECONDS=20`, `AI_APPLICATION_TIMEOUT_SECONDS=90`.
+Бюджет заявки начинается при запуске анализа; каждому worker даётся минимум
+оставшегося бюджета и лимита пары, включая импорт/инициализацию модуля.
+Worker завершается при превышении лимита; следующие пары получают AI_TIMEOUT,
+если бюджет заявки исчерпан. Это лимит AI-фазы, не таймаут загрузки Excel/БД.
+Сбой опционального AI не переводит заявку в error. Локальные категории сохраняются,
+needs_review=true и добавляется код AI_UNAVAILABLE/AI_TIMEOUT/AI_INVALID_RESPONSE.
+Незаполненные дозировка/количество/сумма, нецелое или неположительное количество
+дают AI_INPUT_INCOMPLETE без вызова модуля. Значения не дополняются и не округляются.
+
+Новые коды добавлены в ReviewReason и подписи, также AI_PRELIMINARY и
+AI_REVIEW_REQUIRED. Миграция не нужна: `review_reason` уже TEXT в миграции
+`a1b2c3d4e5f6`, PostgreSQL enum причины не создавался. Схема публичного API прежняя.
+
+Тяжёлые torch/transformers не устанавливаются ни в один из этих образов.
+`ai-offline` копирует только исходники библиотеки и использует существующие backend
+зависимости; `ai-network` дополнительно ставит backend extra `.[ai-network]` с SDK.
+Сам `pip install ./ai` намеренно не вызывается: он тянет все обязательные зависимости AI.
+Для локального Python доступен тот же extra; исходники подхватываются из `ai/src`.
+Template-образ исходников AI не содержит и работает без SDK/весов.
+
+Пример карточки: [docs/offline-card-example.json](docs/offline-card-example.json),
+`data/demo/correct.xlsx`, demo-api-2, offline. Получен настоящими парсером,
+правилами, Pipeline и API mapper с подменой хранения в памяти; не является
+подтверждением PostgreSQL roundtrip. A/B/V = 900/50/50, индикатор green, все три
+локальные категории и версия сохранены, добавлены извлечённые пояснения corpus.
+
+Допущения и нерешённое:
+
+- Валюта отсутствует в backend: временно AI_CURRENCY=RUB, требуется подтверждение аналитиком.
+- Предварительная категория допустима только при одной категории безусловных CATEGORY
+  утверждений для точной пары МНН/диагноз; всегда needs_review=true/AI_PRELIMINARY.
+  При конфликте/нехватке условий категория не угадывается. ML-2 и live ГРЛС/КР не запускаются.
+- Подтверждённое правило имеет приоритет даже при конфликте corpus; пояснение помечает
+  ручную проверку. Существующие расчёты включают предварительную категорию, но она
+  остаётся на проверке; правила агрегации/индикатора нужно подтвердить аналитиком.
+- Нужны контракт реальных данных без is_demo, согласование валюты/условных правил,
+  структурированное хранение цитат/версий и клиническая приёмка. Синтетический corpus
+  не является клинической истиной. Решения секретаря AI не принимает.
+- Расхождения с автономным Excel-сценарием: offline default, обязательный TLS,
+  никаких live-загрузок/эмбеддингов, строгий внешний allowlist. `ai/` и `frontend/`
+  не изменены. Старое имя режима `module` заменено явными offline/network по заданию.
+
+Проверки (на отдельной тестовой БД, секреты уже в окружении хоста):
+
+```bash
+RUN_POSTGRES_TESTS=1 bash scripts/smoke_e2e.sh
+```
+
+Smoke явно отключает чтение `.env`, принудительно выбирает template и никогда
+не запускает network-check.
+Для отдельных PostgreSQL тестов на ai-offline образе:
+
+```bash
+python scripts/compose_ai.py exec -T -e RUN_POSTGRES_TESTS=1 -e AI_MODE=template -e ENABLE_APPLICATION_LIST=true api env -u DOCS_ENABLED -u LIST_ENDPOINT_ENABLED pytest -q
+python scripts/compose_ai.py exec -T api ruff check app tests alembic scripts
+python scripts/compose_ai.py exec -T api ruff format --check app tests alembic scripts
+```
+
+`env -u` здесь только убирает конфликтующие алиасы флагов и запускает pytest;
+значения окружения не выводятся. AI-тесты сами явно выбирают нужный режим;
+реальный offline тест пропускается в template образе, где модуль отсутствует.

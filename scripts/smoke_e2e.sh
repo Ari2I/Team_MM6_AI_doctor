@@ -3,13 +3,16 @@ set -euo pipefail
 # Never enable shell tracing: credentials are supplied by the caller's environment.
 # Explicit empty values override credentials from .env in the open smoke mode.
 export WEB_USER="${WEB_USER:-}" WEB_PASSWORD="${WEB_PASSWORD:-}"
+# Smoke is always offline and never inherits an operator's network mode.
+export AI_MODE=template API_BUILD_TARGET=template AI_DEMO_DATA=false
+export GIGACHAT_CREDENTIALS= GIGACHAT_SCOPE= GIGACHAT_CA_BUNDLE_FILE=
 : "${WEB_PORT:?Export an unused WEB_PORT}"
 : "${POSTGRES_DB:?Export POSTGRES_DB}"
 : "${POSTGRES_USER:?Export POSTGRES_USER}"
 : "${POSTGRES_PASSWORD:?Export POSTGRES_PASSWORD}"
 cd "$(dirname "$0")/.."
 project="${COMPOSE_PROJECT_NAME:-vrach-smoke-$(date +%s)-$$}"
-dc=(docker compose -p "$project")
+dc=(docker compose --env-file /dev/null -p "$project")
 if [[ -n "$("${dc[@]}" ps -aq)" ]] || docker volume inspect "${project}_postgres_data" >/dev/null 2>&1; then
     echo "FAIL isolated project: name already in use"
     exit 1

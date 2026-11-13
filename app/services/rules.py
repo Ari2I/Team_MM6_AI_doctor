@@ -109,6 +109,13 @@ def detect_conflicts(checks_for_item: list[PairCheck]) -> list[PairCheck]:
         return checks_for_item
     for check in checks_for_item:
         check.needs_review = True
-        check.review_reason = ReviewReason.CONFLICTING_CATEGORIES
-        check.comment = _COMMENTS[ReviewReason.CONFLICTING_CATEGORIES]
+        if check.review_reason and check.review_reason.value.startswith("AI_"):
+            check.comment = " ".join(
+                part
+                for part in (check.comment, _COMMENTS[ReviewReason.CONFLICTING_CATEGORIES])
+                if part
+            )
+        else:
+            check.review_reason = ReviewReason.CONFLICTING_CATEGORIES
+            check.comment = _COMMENTS[ReviewReason.CONFLICTING_CATEGORIES]
     return checks_for_item

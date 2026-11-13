@@ -1,6 +1,7 @@
 """Загрузка настроек PostgreSQL из переменных окружения и файла .env."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,6 +47,12 @@ TRAFFIC_LIGHT_COLORS = {
 }
 
 REVIEW_REASON_LABELS = {
+    "AI_INPUT_INCOMPLETE": "Для ИИ недостаточно исходных данных.",
+    "AI_UNAVAILABLE": "ИИ недоступен; использован шаблон.",
+    "AI_TIMEOUT": "Истёк бюджет времени ИИ; использован шаблон.",
+    "AI_INVALID_RESPONSE": "Ответ ИИ не прошёл проверку; использован шаблон.",
+    "AI_PRELIMINARY": "Предварительная категория ИИ требует проверки человеком.",
+    "AI_REVIEW_REQUIRED": "Пояснение ИИ требует проверки человеком.",
     "DRUG_NOT_FOUND": "Препарат не найден в справочнике.",
     "DRUG_AMBIGUOUS": "Препарат сопоставлен неоднозначно.",
     "DIAGNOSIS_NOT_FOUND": "Диагноз не найден в справочнике.",
@@ -135,6 +142,30 @@ class LLMSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     provider: str = "template"
+
+
+class AISettings(BaseSettings):
+    """Настройки адаптера: только окружение, без чтения .env и секретов."""
+
+    model_config = SettingsConfigDict(env_prefix="AI_", extra="ignore")
+
+    mode: Literal["template", "offline", "network"] = "template"
+    pair_timeout_seconds: float = Field(default=20, gt=0, allow_inf_nan=False)
+    application_timeout_seconds: float = Field(default=90, gt=0, allow_inf_nan=False)
+    corpus_path: str = "ai/examples/corpus.json"
+    demo_data: bool = False
+    # TODO: уточнить у аналитика валюту; backend пока не хранит валюту позиции.
+    currency: str = Field(default="RUB", pattern=r"^[A-Z]{3}$")
+
+
+class AINetworkSettings(BaseSettings):
+    """Создаётся только сетевым worker; секрет остаётся в памяти процесса."""
+
+    model_config = SettingsConfigDict(env_prefix="GIGACHAT_", extra="ignore")
+
+    credentials: SecretStr
+    scope: str = ""
+    ca_bundle_file: str = ""
 
 
 @lru_cache

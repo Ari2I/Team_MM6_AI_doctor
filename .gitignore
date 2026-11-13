@@ -19,3 +19,4 @@ dist/
 *.xls
 !tests/data/*.xlsx
 !tests/data/*.xls
+/certs
