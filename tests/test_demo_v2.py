@@ -84,7 +84,7 @@ def demo_client() -> Iterator[TestClient]:
             assert (len(version.drugs), len(version.diagnoses), len(version.rules)) == (4, 2, 3)
             snapshot = _load_snapshot(session)
             conditional = check_pair(
-                match_drug("Условнодемо", snapshot),
+                match_drug("Симбикорт Турбухалер", snapshot),
                 match_diagnosis("Демо-диагноз", snapshot),
                 snapshot,
             )
