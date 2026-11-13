@@ -13,3 +13,4 @@ AGENTS.override.md
 .vscode/
 .DS_Store
 Thumbs.db
+.npm-cache/

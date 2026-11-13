@@ -19,7 +19,11 @@ a { color: #146357; font-weight: 650; text-underline-offset: 3px; }
 .upload-fields { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
 label { display: grid; gap: 6px; font-size: .88rem; font-weight: 650; }
 .file-label { flex: 1 1 260px; min-width: 0; }
-input, select, button { font: inherit; }
+input, select, textarea, button { font: inherit; }
+textarea { max-width: 100%; border: 1px solid #b9cfca; border-radius: 7px; padding: 7px; }
+.button:disabled { opacity: .55; cursor: default; }
+.pair-check { padding: 8px 0; overflow-wrap: anywhere; }
+.pair-check + .pair-check { border-top: 1px solid #dce8e5; }
 input[type=file], select { width: 100%; max-width: 100%; border: 1px solid #b9cfca; border-radius: 7px; padding: 7px; color: #213f41; background: #f9fbfa; min-height: 42px; }
 input::file-selector-button { border: 0; border-radius: 4px; padding: 4px 8px; margin-right: 8px; color: #174b46; background: #dfeeea; font: inherit; cursor: pointer; }
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 8px 14px; border: 1px solid #b9cfca; border-radius: 7px; text-decoration: none; font-weight: 700; cursor: pointer; }
