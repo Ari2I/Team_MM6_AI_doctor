@@ -6,8 +6,8 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
-    ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      ENABLE_API_DOCS: "false"
+      ENABLE_APPLICATION_LIST: "false"
     depends_on:
       db:
         condition: service_healthy
@@ -21,6 +21,22 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  web:
+    build: ./frontend
+    environment:
+      WEB_USER: ${WEB_USER:?Укажите WEB_USER в окружении}
+      WEB_PASSWORD: ${WEB_PASSWORD:?Укажите WEB_PASSWORD в окружении}
+    ports:
+      - "${WEB_PORT:?Укажите WEB_PORT в окружении}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   db:
     image: postgres:16-alpine

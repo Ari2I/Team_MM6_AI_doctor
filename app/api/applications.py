@@ -12,8 +12,9 @@ from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
+from starlette.exceptions import HTTPException
 
-from app.config import CATEGORY_LABELS, DISCLAIMER, get_validation_settings
+from app.config import CATEGORY_LABELS, DISCLAIMER, get_access_settings, get_validation_settings
 from app.models import (
     Application,
     ApplicationDiagnosis,
@@ -38,6 +39,11 @@ from app.services.validator import validate_file, validate_parse_result
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 logger = logging.getLogger(__name__)
+
+
+def require_application_list() -> None:
+    if not get_access_settings().enable_application_list:
+        raise HTTPException(status_code=404, detail="Страница не найдена.")
 
 
 def get_session() -> Iterator[Session]:
@@ -220,6 +226,7 @@ def create_application(
     "",
     response_model=list[ApplicationListEntry],
     summary="Получить список заявок",
+    dependencies=[Depends(require_application_list)],
     description="Заявки по убыванию времени создания с пагинацией limit/offset.",
     responses={422: {"model": APIErrors, "description": "Недопустимые параметры страницы"}},
 )

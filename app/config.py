@@ -7,6 +7,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
 DISCLAIMER = "Результат анализа носит рекомендательный характер и требует проверки человеком."
+
+
+class AccessSettings(BaseSettings):
+    """Возможности разработки, выключенные при отсутствии настроек."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    enable_api_docs: bool = False
+    enable_application_list: bool = False
+
+
+def get_access_settings() -> AccessSettings:
+    return AccessSettings()
+
+
 # TODO: уточнить у аналитика названия категорий для отображения.
 CATEGORY_LABELS = {
     "A": "Жизненно необходимые",

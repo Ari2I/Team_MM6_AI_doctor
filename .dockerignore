@@ -12,3 +12,4 @@ build
 dist
 *.xlsx
 *.xls
+!tests/data/*.xlsx
