@@ -13,3 +13,4 @@ dist
 *.xlsx
 *.xls
 !tests/data/*.xlsx
+!data/demo/*.xlsx

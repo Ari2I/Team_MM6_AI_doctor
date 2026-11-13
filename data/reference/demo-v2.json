@@ -1,0 +1,54 @@
+{
+  "reference_version": "demo-api-2",
+  "name": "Синтетические демо-данные — не клинические рекомендации",
+  "description": "Синтетические данные из ai/examples/corpus.json (demo-2026-10-18.1); не клинические рекомендации. Условное утверждение demo_marker=present не импортировано: backend не поддерживает условия.",
+  "is_synthetic": true,
+  "drugs": [
+    {
+      "trade_name": "Альфадемо",
+      "mnn": "демо-вещество-а"
+    },
+    {
+      "trade_name": "Бетадемо",
+      "mnn": "демо-вещество-б"
+    },
+    {
+      "trade_name": "Вегадемо",
+      "mnn": "демо-вещество-в"
+    },
+    {
+      "trade_name": "Условнодемо",
+      "mnn": "демо-условное"
+    }
+  ],
+  "diagnoses": [
+    {
+      "diagnosis_id": "demo",
+      "name": "Демо-диагноз"
+    },
+    {
+      "diagnosis_id": "no-rules",
+      "name": "Синтетический сценарий без правил"
+    }
+  ],
+  "rules": [
+    {
+      "mnn": "демо-вещество-а",
+      "diagnosis_id": "demo",
+      "category": "A",
+      "source": "Синтетический corpus demo-2026-10-18.1, master-demo/master-a/category-a; не клинические рекомендации"
+    },
+    {
+      "mnn": "демо-вещество-б",
+      "diagnosis_id": "demo",
+      "category": "B",
+      "source": "Синтетический corpus demo-2026-10-18.1, master-demo/master-b/category-b; не клинические рекомендации"
+    },
+    {
+      "mnn": "демо-вещество-в",
+      "diagnosis_id": "demo",
+      "category": "V",
+      "source": "Синтетический corpus demo-2026-10-18.1, master-demo/master-c/category-c; не клинические рекомендации"
+    }
+  ]
+}
