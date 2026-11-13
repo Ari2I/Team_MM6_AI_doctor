@@ -23,9 +23,9 @@ def test_list_disabled_before_database_access(monkeypatch: pytest.MonkeyPatch) -
         assert client.get("/health").status_code == 200
 
 
-def test_safe_defaults() -> None:
-    settings = AccessSettings(_env_file=None, _env_ignore_empty=True)
-    # Explicit input isolates the defaults from developer environment variables.
-    assert AccessSettings.model_fields["enable_api_docs"].default is False
-    assert AccessSettings.model_fields["enable_application_list"].default is False
-    assert isinstance(settings.enable_api_docs, bool)
+def test_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ENABLE_API_DOCS", raising=False)
+    monkeypatch.delenv("ENABLE_APPLICATION_LIST", raising=False)
+    settings = AccessSettings(_env_file=None)
+    assert settings.enable_api_docs is False
+    assert settings.enable_application_list is False
