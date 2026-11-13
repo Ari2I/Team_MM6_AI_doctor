@@ -56,8 +56,7 @@ def variant(*, typo: bool = False) -> bytes:
         sheet["A2"] = "Нурафен"
     else:
         sheet["E2"] = None
-        sheet.delete_rows(4, 4)
-        sheet["E3"] = "Учебный диагноз 02"
+        sheet.delete_rows(5, 3)
     buffer = BytesIO()
     workbook.save(buffer)
     workbook.close()
