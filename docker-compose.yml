@@ -6,6 +6,9 @@ services:
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:?Укажите POSTGRES_DB в окружении}
+      POSTGRES_USER: ${POSTGRES_USER:?Укажите POSTGRES_USER в окружении}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Укажите POSTGRES_PASSWORD в окружении}
       ENABLE_API_DOCS: "false"
       ENABLE_APPLICATION_LIST: "false"
     depends_on:
