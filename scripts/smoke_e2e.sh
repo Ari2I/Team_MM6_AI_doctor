@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Never enable shell tracing: credentials are supplied by the caller's environment.
-: "${WEB_USER:?Export WEB_USER}"
-: "${WEB_PASSWORD:?Export WEB_PASSWORD}"
+# Explicit empty values override credentials from .env in the open smoke mode.
+export WEB_USER="${WEB_USER:-}" WEB_PASSWORD="${WEB_PASSWORD:-}"
 : "${WEB_PORT:?Export an unused WEB_PORT}"
 : "${POSTGRES_DB:?Export POSTGRES_DB}"
 : "${POSTGRES_USER:?Export POSTGRES_USER}"
@@ -30,5 +30,11 @@ echo "OK migrations"
 echo "OK reference demo.json activated"
 curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${WEB_PORT}/health" >/dev/null
 echo "OK published health"
-"${dc[@]}" exec -T -e WEB_USER -e WEB_PASSWORD api python - < scripts/smoke_scenarios.py
+if [[ -n "$WEB_USER" && -n "$WEB_PASSWORD" ]]; then
+    echo "MODE protected"
+    "${dc[@]}" exec -T -e WEB_USER -e WEB_PASSWORD api python - < scripts/smoke_scenarios.py
+else
+    echo "MODE open (no credentials sent)"
+    "${dc[@]}" exec -T -e WEB_USER= -e WEB_PASSWORD= api python - < scripts/smoke_scenarios.py
+fi
 echo "OK smoke_e2e"

@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -14,8 +14,16 @@ class AccessSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    enable_api_docs: bool = False
-    enable_application_list: bool = False
+    enable_api_docs: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("DOCS_ENABLED", "ENABLE_API_DOCS", "enable_api_docs"),
+    )
+    enable_application_list: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "LIST_ENDPOINT_ENABLED", "ENABLE_APPLICATION_LIST", "enable_application_list"
+        ),
+    )
 
 
 def get_access_settings() -> AccessSettings:

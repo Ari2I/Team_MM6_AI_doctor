@@ -9,8 +9,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?Укажите POSTGRES_DB в окружении}
       POSTGRES_USER: ${POSTGRES_USER:?Укажите POSTGRES_USER в окружении}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Укажите POSTGRES_PASSWORD в окружении}
-      ENABLE_API_DOCS: "false"
-      ENABLE_APPLICATION_LIST: "false"
+      DOCS_ENABLED: ${DOCS_ENABLED:-${ENABLE_API_DOCS:-false}}
+      LIST_ENDPOINT_ENABLED: ${LIST_ENDPOINT_ENABLED:-${ENABLE_APPLICATION_LIST:-false}}
     depends_on:
       db:
         condition: service_healthy
@@ -28,8 +28,8 @@ services:
   web:
     build: ./frontend
     environment:
-      WEB_USER: ${WEB_USER:?Укажите WEB_USER в окружении}
-      WEB_PASSWORD: ${WEB_PASSWORD:?Укажите WEB_PASSWORD в окружении}
+      WEB_USER: ${WEB_USER:-}
+      WEB_PASSWORD: ${WEB_PASSWORD:-}
     ports:
       - "${WEB_PORT:?Укажите WEB_PORT в окружении}:80"
     depends_on:

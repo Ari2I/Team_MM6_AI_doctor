@@ -11,15 +11,19 @@ from uuid import uuid4
 
 from openpyxl import load_workbook
 
+from app.config import get_access_settings
+
 BASE = "http://web:80"
 DATA = Path("tests/data")
-TOKEN = base64.b64encode(f"{os.environ['WEB_USER']}:{os.environ['WEB_PASSWORD']}".encode()).decode()
+USER = os.environ.get("WEB_USER", "")
+PASSWORD = os.environ.get("WEB_PASSWORD", "")
+TOKEN = base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode() if USER and PASSWORD else None
 
 
 def request(
     path: str, data: bytes | None = None, content_type: str | None = None, *, auth: bool = True
 ) -> tuple[int, bytes, str]:
-    headers = {"Authorization": f"Basic {TOKEN}"} if auth else {}
+    headers = {"Authorization": f"Basic {TOKEN}"} if auth and TOKEN else {}
     if content_type:
         headers["Content-Type"] = content_type
     req = Request(BASE + path, data=data, headers=headers)
@@ -65,16 +69,18 @@ def variant(*, typo: bool = False) -> bytes:
 
 def access() -> None:
     assert request("/health", auth=False)[0] == 200
-    for path in (
-        "/",
-        "/index.html",
-        "/applications",
-        "/applications/",
-        "/docs",
-        "/applications/00000000-0000-0000-0000-000000000000/report.xlsx",
-    ):
-        assert request(path, auth=False)[0] == 401, path
-    assert request("/applications", b"", auth=False)[0] == 401
+    settings = get_access_settings()
+    paths = {
+        "/": 200,
+        "/index.html": 200,
+        "/applications": 200 if settings.enable_application_list else 404,
+        "/applications/": 200 if settings.enable_application_list else 404,
+        "/docs": 200 if settings.enable_api_docs else 404,
+        "/applications/00000000-0000-0000-0000-000000000000/report.xlsx": 404,
+    }
+    for path, open_status in paths.items():
+        assert request(path, auth=False)[0] == (401 if TOKEN else open_status), path
+    assert request("/applications", b"", auth=False)[0] == (401 if TOKEN else 422)
     assert request("/")[0] == 200
     status, html, _ = request("/")
     assert status == 200
@@ -83,10 +89,12 @@ def access() -> None:
     assets = re.findall(rb'(?:src|href)="(/assets/[^\"]+)"', html)
     assert assets
     for asset in assets:
-        assert request(asset.decode(), auth=False)[0] == 401
+        assert request(asset.decode(), auth=False)[0] == (401 if TOKEN else 200)
         assert request(asset.decode())[0] == 200
-    for path in ("/docs", "/redoc", "/openapi.json", "/applications", "/applications/"):
-        assert request(path)[0] == 404, path
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert request(path)[0] == (200 if settings.enable_api_docs else 404), path
+    for path in ("/applications", "/applications/"):
+        assert request(path)[0] == (200 if settings.enable_application_list else 404), path
 
 
 def analyzed(content: bytes) -> dict:
