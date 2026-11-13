@@ -27,7 +27,9 @@ echo "OK stack"
 "${dc[@]}" exec -T api alembic upgrade head
 echo "OK migrations"
 if [[ "${RUN_POSTGRES_TESTS:-0}" == "1" ]]; then
-    "${dc[@]}" exec -T -e RUN_POSTGRES_TESTS=1 -e LIST_ENDPOINT_ENABLED=true api pytest -q
+    # Legacy access tests set ENABLE_* themselves; remove higher-priority aliases.
+    "${dc[@]}" exec -T -e RUN_POSTGRES_TESTS=1 -e ENABLE_APPLICATION_LIST=true api \
+        env -u DOCS_ENABLED -u LIST_ENDPOINT_ENABLED -u ENABLE_API_DOCS pytest -q
     echo "OK PostgreSQL tests"
 fi
 "${dc[@]}" exec -T api python -m app.scripts.import_reference data/reference/demo.json --activate
