@@ -26,6 +26,10 @@ trap cleanup EXIT
 echo "OK stack"
 "${dc[@]}" exec -T api alembic upgrade head
 echo "OK migrations"
+if [[ "${RUN_POSTGRES_TESTS:-0}" == "1" ]]; then
+    "${dc[@]}" exec -T -e RUN_POSTGRES_TESTS=1 -e LIST_ENDPOINT_ENABLED=true api pytest -q
+    echo "OK PostgreSQL tests"
+fi
 "${dc[@]}" exec -T api python -m app.scripts.import_reference data/reference/demo.json --activate
 echo "OK reference demo.json activated"
 curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${WEB_PORT}/health" >/dev/null
@@ -37,4 +41,7 @@ else
     echo "MODE open (no credentials sent)"
     "${dc[@]}" exec -T -e WEB_USER= -e WEB_PASSWORD= api python - < scripts/smoke_scenarios.py
 fi
+"${dc[@]}" exec -T api python -m app.scripts.import_reference data/reference/demo-v2.json --activate
+echo "OK reference demo-v2.json activated"
+"${dc[@]}" exec -T -e WEB_USER -e WEB_PASSWORD -e SMOKE_REFERENCE_VERSION=demo-api-2 api python - < scripts/smoke_scenarios.py
 echo "OK smoke_e2e"
