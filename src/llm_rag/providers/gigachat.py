@@ -3,6 +3,9 @@
 import json
 import math
 import ssl
+from time import perf_counter
+
+from llm_rag.diagnostics import safe_diagnostic
 
 from gigachat import GigaChat
 from gigachat.exceptions import GigaChatException, ResponseError
@@ -70,6 +73,8 @@ class GigaChatProvider:
             raise ValueError("Некорректный формат ключа GigaChat")
         if type(verify_ssl_certs) is not bool:
             raise ValueError("Проверка сертификата должна задаваться логическим значением")
+        self._timeout = timeout
+        self.last_diagnostic = None
         self._model = model
         self.usage_totals = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
         tls = ssl.create_default_context() if verify_ssl_certs else None
@@ -94,39 +99,61 @@ class GigaChatProvider:
         self.close()
 
     def generate(self, payload: dict) -> dict:
+        started = perf_counter()
+        self.last_diagnostic = None
+        self._diagnostic_stage = 'request_preparation'
+        try:
+            return self._generate(payload)
+        except Exception as error:
+            self.last_diagnostic = safe_diagnostic(error, stage=self._diagnostic_stage,
+                elapsed_ms=(perf_counter() - started) * 1000)
+            self.last_diagnostic['timeout_seconds'] = self._timeout
+            raise
+
+    def _generate(self, payload: dict) -> dict:
         if payload.get("is_demo") is not True:
             raise ProviderError("DEMO_DATA_REQUIRED")
-        schema = GeneratedResponse.model_json_schema()
-        # Структурированный ответ должен относиться только к обрабатываемой позиции.
-        schema["properties"]["item_id"] = {"type": "string", "enum": [payload["item"]["item_id"]]}
-        schema.pop("$defs")
-        # Не передаём общий шаблон \S: генератор GigaChat ограничивает им строку целиком.
-        # Значения и связи полей берём из уже проверенного пакета оснований.
-        alternatives = [{
-            "type": "object", "additionalProperties": False,
-            "properties": {key: {"type": "string", "enum": [claim[key]]}
-                           for key in ("claim_id", "text", "fragment_id", "quote")},
-            "required": ["claim_id", "text", "fragment_id", "quote"],
-        } for claim in payload["evidence"]]
-        staff_mode = payload.get('schema_version') == 'staff-report.1'
-        if staff_mode:
-            for alternative, claim in zip(alternatives, payload['evidence']):
-                alternative['properties']['text']['enum'] = [claim['text'], *claim.get('allowed_texts', [])]
-        schema["properties"]["claims"] = {
-            "type": "array", "minItems": len(alternatives), "maxItems": len(alternatives),
-            "uniqueItems": True,
-            "items": (alternatives[0] if len(alternatives) == 1 else {"oneOf": alternatives})
-                     if alternatives else {"type": "object"},
-        }
-        # Инструкции заданы кодом и не берутся из входного запроса или текста документов.
-        context = {key: payload[key] for key in ("schema_version", "is_demo", "corpus_version", "item", "evidence")}
+        wire_mode = payload.get('schema_version') == 'staff-facts.2'
+        staff_mode = wire_mode
         instructions = INSTRUCTIONS
-        if staff_mode:
-            from llm_rag.staff_report import STAFF_INSTRUCTIONS
-            instructions = STAFF_INSTRUCTIONS
+        if wire_mode:
+            from llm_rag.staff_report import STAFF_WIRE_INSTRUCTIONS
+            from llm_rag.staff_contracts import StaffFacts, StaffWireAnalysis, staff_wire_schema
+            facts = StaffFacts.model_validate(payload)
+            if len(facts.pairs) != 1:
+                raise ProviderError('GIGACHAT_INVALID_RESPONSE')
+            packet = facts.pairs[0]
+            schema = staff_wire_schema(packet)
+            instructions = STAFF_WIRE_INSTRUCTIONS
+            context = facts.model_dump(mode='json')
+        else:
+            schema = GeneratedResponse.model_json_schema()
+            # Структурированный ответ должен относиться только к обрабатываемой позиции.
+            schema["properties"]["item_id"] = {"type": "string", "enum": [payload["item"]["item_id"]]}
+            schema.pop("$defs")
+            # Не передаём общий шаблон \S: генератор GigaChat ограничивает им строку целиком.
+            # Значения и связи полей берём из уже проверенного пакета оснований.
+            alternatives = [{
+                "type": "object", "additionalProperties": False,
+                "properties": {key: {"type": "string", "enum": [claim[key]]}
+                               for key in ("claim_id", "text", "fragment_id", "quote")},
+                "required": ["claim_id", "text", "fragment_id", "quote"],
+            } for claim in payload["evidence"]]
+            staff_mode = payload.get('schema_version') == 'staff-report.1'
+            if staff_mode:
+                for alternative, claim in zip(alternatives, payload['evidence']):
+                    alternative['properties']['text']['enum'] = [claim['text'], *claim.get('allowed_texts', [])]
+            schema["properties"]["claims"] = {
+                "type": "array", "minItems": len(alternatives), "maxItems": len(alternatives),
+                "uniqueItems": True,
+                "items": (alternatives[0] if len(alternatives) == 1 else {"oneOf": alternatives})
+                         if alternatives else {"type": "object"},
+            }
+            # Инструкции заданы кодом и не берутся из входного запроса или текста документов.
+            context = {key: payload[key] for key in ("schema_version", "is_demo", "corpus_version", "item", "evidence")}
         try:
             request = Chat(
-                model=self._model, stream=False, function_call="none", max_tokens=4096 if staff_mode else 2048,
+                model=self._model, stream=False, function_call="none", max_tokens=1500 if wire_mode else (4096 if staff_mode else 2048),
                 messages=[
                     {"role": "system", "content": instructions},
                     {"role": "user", "content": json.dumps(context, ensure_ascii=False, allow_nan=False)},
@@ -134,7 +161,9 @@ class GigaChatProvider:
                 # В SDK 0.2.0 дополнительные параметры передаются через additional_fields.
                 additional_fields={"response_format": {"type": "json_schema", "schema": schema, "strict": True}},
             )
+            self._diagnostic_stage = 'provider_request'
             response = self._client.chat(request)
+            self._diagnostic_stage = 'provider_response'
             # Только счётчики из ответа API, без текста запроса и учётных данных.
             if response.usage is not None:
                 for key in self.usage_totals:
@@ -151,7 +180,24 @@ class GigaChatProvider:
                 raise ProviderError("GIGACHAT_INVALID_COMPLETION")
             if len(message.content.encode("utf-8")) > 1_000_000:
                 raise ProviderError("GIGACHAT_RESPONSE_TOO_LARGE")
-            return _json_object(message.content)
+            raw = _json_object(message.content)
+            if wire_mode:
+                wire = StaffWireAnalysis.model_validate(raw)
+                if wire.pair_id != packet.pair_id:
+                    raise ProviderError('RESPONSE_ITEM_MISMATCH')
+                def observation(text):
+                    return dict(text=text, fact_refs=wire.fact_refs, citation_refs=wire.citation_refs)
+                analysis = dict(pair_id=wire.pair_id, category=packet.facts['category'],
+                    citations=[c.model_dump(mode='json') for c in packet.citations],
+                    established=[dict(text=('В заявке указан диагноз: ' + packet.facts['diagnosis']
+                        + '; МНН покупки: ' + (packet.facts['inn'] or 'не установлено')
+                        + '; исходная категория: ' + (packet.facts['category'] or 'не установлена')
+                        + '; статус ML-2: ' + packet.facts['ml2_status'] + '.'),
+                        fact_refs=['diagnosis', 'inn', 'category', 'ml2_status'], citation_refs=[])],
+                    uncertain=[observation(wire.uncertain)],
+                    questions=[dict(observation(wire.question), why=wire.why)])
+                return dict(schema_version='staff-analysis.2', recommendations=[analysis])
+            return raw
         except httpx.TimeoutException:
             raise ProviderError("GIGACHAT_TIMEOUT") from None
         except httpx.HTTPError as error:

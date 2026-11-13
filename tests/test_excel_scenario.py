@@ -167,6 +167,9 @@ def test_bad_file_does_not_prevent_processing_good_file(
         def __enter__(self): return self
         def __exit__(self, *args): pass
         def generate(self, payload):
+            if payload.get('schema_version') == 'staff-facts.2':
+                from tests.test_staff_report import substantive_response
+                return substantive_response(payload)
             return dict(item_id=payload['item']['item_id'], claims=[
                 {k: c[k] for k in ('claim_id', 'text', 'fragment_id', 'quote')} for c in payload['evidence']])
     monkeypatch.setattr(checker, 'ML2GigaChatProvider', Provider)
@@ -188,7 +191,16 @@ def test_bad_file_does_not_prevent_processing_good_file(
     assert all(options['scope'] == expected_scope for options in provider_options)
     records = list((tmp_path / 'reports').glob('*/001/result.json'))
     assert len(records) == 1
-    assert json.loads(records[0].read_text(encoding='utf-8'))['input_sha256'] == sha256(raw).hexdigest()
+    diagnostic_log = json.loads((records[0].parent / 'diagnostics.json').read_text(encoding='utf-8'))
+    assert diagnostic_log['schema_version'] == 'diagnostics.1'
+    assert 'request_id' not in str(diagnostic_log)
+    saved = json.loads(records[0].read_text(encoding='utf-8'))
+    assert saved['input_sha256'] == sha256(raw).hexdigest()
+    assert saved['human_report']['schema_version'] == 'human-report.1'
+    assert 'usage' not in saved['human_report']
+    assert 'application' in saved and 'staff_report' in saved
+    from llm_rag.human_report import render_human_report
+    assert (records[0].parent / 'report.html').read_text(encoding='utf-8') == render_human_report(saved['human_report'])
 
 
 def test_report_escapes_input_and_keeps_unknown_visible(tmp_path):

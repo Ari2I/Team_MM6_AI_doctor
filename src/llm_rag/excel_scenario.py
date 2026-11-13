@@ -1,6 +1,9 @@
 """Автономный учебный сценарий аналитика: исходная Excel-карточка → отчёт."""
 
 from dataclasses import dataclass
+from time import perf_counter
+
+from llm_rag.diagnostics import safe_diagnostic
 from contextlib import ExitStack
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
@@ -174,10 +177,11 @@ class CallCounter:
     def __init__(self, provider, *, classification=False):
         self.provider = provider
         self.classification = classification
-        self.stats = dict(calls=0, responses=0, tokens=0, errors=[])
+        self.stats = dict(calls=0, responses=0, tokens=0, errors=[], diagnostics=[])
         self.complete = gigachat_completer(provider) if classification else None
 
     def __call__(self, *args):
+        started = perf_counter()
         self.stats['calls'] += 1
         before = self.provider.usage_totals['total_tokens']
         try:
@@ -185,7 +189,10 @@ class CallCounter:
             self.stats['responses'] += 1
             return response
         except Exception as error:
-            code = str(error)
+            diagnostic = getattr(self.provider, 'last_diagnostic', None) or safe_diagnostic(
+                error, stage='provider_request', elapsed_ms=(perf_counter() - started) * 1000)
+            self.stats['diagnostics'].append(diagnostic)
+            code = diagnostic['code']
             self.stats['errors'].append(PROVIDER_ERROR_MESSAGES.get(code, 'Ошибка API; сырой текст исключения скрыт.'))
             raise
         finally:
@@ -237,87 +244,18 @@ def process_card(card, registry, sources, classifier, renderer):
                 for c in input.citations):
             input.missing_context = sorted(set(input.missing_context + ['context.age']))
         snapshots.append(snapshot.model_dump(mode='json'))
-        pairs.extend(explain_pairs([input], snapshot, provider=renderer))
+        pairs.extend(explain_pairs([input], snapshot))
     app = summarize_explanations(pairs, purchases=[PurchaseAmount(request_id=batch.request.request_id,
         item_id=i.item_id, amount=i.original.amount, currency=i.original.currency) for i in batch.request.items])
     return app, batch, snapshots
 
 
-def write_report(folder, name, app, usage, items, *, staff_report=None):
-    """HTML для аналитика; любые входные тексты экранируются."""
+def write_report(folder, name, app, usage, items, *, staff_report=None, human_report=None, diagnosis=None):
+    """Сохранить HTML из того же публичного представления, которое получает интерфейс."""
+    from llm_rag.human_report import build_human_report, render_human_report
     folder.mkdir(parents=True, exist_ok=True)
-    labels = {i.item_id: i.original.trade_name for i in items}
-    parts = ['<!doctype html><html lang="ru"><meta charset="utf-8"><title>Проверка заявки</title>',
-        '<style>body{font:16px/1.5 system-ui;max-width:1100px;margin:32px auto;padding:0 24px;color:#172b45}'
-        'article{border-top:1px solid #ccd5df;padding:18px 0}blockquote{background:#f1f5fa;padding:12px}'
-        'pre{white-space:pre-wrap}a{color:#175a9c}</style>',
-        '<h1>Проверка заявки: ' + escape(name) + '</h1>',
-        '<p>Учебная карточка с реальными названиями. Классификация по клиническим рекомендациям. '
-        'Решение о выплате не принимается. Дозировка не оценивалась.</p>']
-    classified = sum(p.category is not None for p in app.pairs)
-    parts.append(f'<p><strong>Категория назначена для {classified} из {len(app.pairs)} позиций.</strong> '
-                 + ('Для позиций без категории указаны причины и недостающие сведения.'
-                    if classified < len(app.pairs) else 'Классификация всех позиций завершена.') + '</p>')
-    if app.unresolved_pair_ids:
-        parts.append(f'<p>Проверка оснований требует уточнения для {len(app.unresolved_pair_ids)} позиций. Причины приведены ниже.</p>')
-    recommendations = {}
-    if staff_report is not None:
-        from llm_rag.explanation_contracts import pair_key
-        recommendations = {r.pair_id: r for r in staff_report.recommendations}
-        status = {'MODEL': 'Рекомендации оформлены GigaChat и прошли проверку.',
-                  'FALLBACK': 'Ответ модели не принят или недоступен. Показаны резервные рекомендации.',
-                  'OFFLINE': 'Рекомендации подготовлены без вызова модели.'}[staff_report.generation_status]
-        parts.append('<p><strong>' + status + '</strong></p>')
-    for p in app.pairs:
-        parts.append('<article><h2>' + escape(labels.get(p.item_id, p.item_id)) + '</h2>')
-        if staff_report is not None:
-            recommendation = recommendations.get(pair_key(p))
-            if recommendation:
-                parts.append('<h3>Что сделать сотруднику</h3><ol>')
-                parts.extend('<li>' + escape(action) + '</li>' for action in recommendation.actions)
-                parts.append('</ol>')
-        status_labels = {'VERIFIED': 'текст и происхождение основания проверены в указанном объёме',
-            'INSUFFICIENT_DATA': 'не хватает сведений для проверки применимости',
-            'UNCONFIRMED': 'основание категории не подтверждено', 'SOURCE_CONFLICT': 'есть конфликт оснований',
-            'PROCESSING_ERROR': 'техническая ошибка проверки'}
-        comment = p.comment
-        for key, label in [('context.age_group', 'возрастная группа'), ('context.age', 'возраст заявителя'),
-                           ('citation_age_applicability', 'возрастные условия цитаты требуют отдельной сверки'),
-                           ('clinical_applicability', 'применимость клинических условий независимо не проверена'),
-                           ('condition:', 'условие применимости:')]:
-            comment = comment.replace(key, label)
-        parts += ['<p>Исходная категория: ' + escape(p.category or 'не установлена') + '. Проверка: '
-                  + escape(status_labels[p.evidence_status]) + '.</p>', '<p>' + escape(comment) + '</p>',
-                  '<details><summary>Технические статусы</summary><p>ML-2: ' + escape(p.ml2_status)
-                  + '; основание: ' + escape(p.evidence_status) + '</p></details>']
-        groups = {}
-        for c in p.citations:
-            groups.setdefault((c.source_id, c.version, c.url, c.copy_url), []).append(c)
-        for group in groups.values():
-            source = group[0]
-            parts.append('<h3><a href="' + escape(source.url, quote=True) + '">' + escape(source.title)
-                         + '</a> · ' + escape(source.version) + '</h3>')
-            parts.append('<p>Текст сверен с сохранённым источником. Применимость к заявителю '
-                         '(возраст, тяжесть и фаза заболевания) требует отдельной сверки.</p>')
-            seen = set()
-            for c in group:
-                key = c.quote, c.location
-                if key in seen:
-                    continue
-                seen.add(key)
-                parts += ['<blockquote>' + escape(c.quote) + '</blockquote><p>Фрагмент: ' + escape(c.location)
-                          + ' · <a href="' + escape(c.url, quote=True) + '">Оригинал источника</a></p>']
-            if source.copy_url:
-                parts.append('<p>Текст получен из <a href="' + escape(source.copy_url, quote=True) + '">копии документа</a>.</p>')
-        if p.rendering_reasons:
-            parts.append('<p>Оформление: резервный шаблон. ' + escape(' '.join(p.rendering_reasons)) + '</p>')
-        parts.append('</article>')
-    parts.append('<h2>Расходы</h2>')
-    for c in app.costs_by_currency:
-        parts.append(f'<p>{c.known_total_amount} {escape(c.currency)}; покупок с неизвестной суммой: {c.unknown_amount_count}.</p>')
-    if app.purchases_without_amount:
-        parts.append('<p>Неизвестная сумма: ' + str(len(app.purchases_without_amount)) + ' покупок.</p>')
-    parts += ['<h2>Обращения к модели</h2><pre>' + escape(json.dumps(usage, ensure_ascii=False, indent=2)) + '</pre>', '</html>']
+    human = human_report if human_report is not None else build_human_report(
+        name, app, items, staff_report=staff_report, diagnosis=diagnosis)
     output = folder / 'report.html'
-    output.write_text('\n'.join(parts), encoding='utf-8')
+    output.write_text(render_human_report(human), encoding='utf-8')
     return output

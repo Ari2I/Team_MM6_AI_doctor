@@ -313,3 +313,44 @@ def test_generation_schema_limits_output_to_complete_allowed_claims(sdk_wire, wi
         mixed["claims"][0]["quote"] = raw["claims"][1]["quote"]
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(mixed, schema)
+
+
+def test_timeout_diagnostic_preserves_transport_type_not_message_or_credentials(sdk_wire):
+    from llm_rag.excel_scenario import CallCounter
+    raw, _, _, _, payload = generate()
+    def handler(request):
+        if request.url.path == '/api/v2/oauth':
+            return httpx.Response(200, json={'access_token': 'test-access', 'expires_at': (NOW + 1800) * 1000})
+        raise httpx.ReadTimeout('SECRET arbitrary server text', request=request)
+    sdk_wire.handler = handler
+    with make_provider() as provider:
+        counted = CallCounter(provider)
+        with pytest.raises(ProviderError, match='GIGACHAT_TIMEOUT'):
+            counted.generate(payload)
+        diagnostic = counted.stats['diagnostics'][0]
+        assert diagnostic['code'] == 'GIGACHAT_TIMEOUT'
+        assert diagnostic['stage'] == 'provider_request'
+        assert 'ReadTimeout' in diagnostic['exception_chain']
+        assert diagnostic['endpoint'] == 'completions'
+        assert diagnostic['elapsed_ms'] >= 0
+        assert diagnostic['traceback']
+        assert 'SECRET' not in str(diagnostic)
+        assert AUTH_KEY not in str(diagnostic) and 'test-access' not in str(diagnostic)
+        assert provider.last_diagnostic['timeout_seconds'] == 20.0
+
+
+def test_safe_diagnostic_handles_timeout_without_attached_request():
+    from llm_rag.diagnostics import safe_diagnostic
+    error = httpx.ReadTimeout('SECRET')
+    diagnostic = safe_diagnostic(error, stage='provider_request')
+    assert diagnostic['exception_chain'] == ['ReadTimeout']
+    assert 'SECRET' not in str(diagnostic)
+
+
+def test_safe_diagnostic_ignores_arbitrary_request_attributes():
+    from llm_rag.diagnostics import safe_diagnostic
+    error = ValueError('SECRET')
+    error.request = 'opaque_request'
+    diagnostic = safe_diagnostic(error, stage='provider_request')
+    assert diagnostic['code'] == 'UNEXPECTED_ERROR'
+    assert 'SECRET' not in str(diagnostic)

@@ -20,6 +20,7 @@ from llm_rag.ml2.provider import ML2GigaChatProvider
 from llm_rag.ml2.registry import RegistrySnapshot
 from llm_rag.providers.gigachat import GigaChatProvider
 from llm_rag.staff_report import recommend_for_staff
+from llm_rag.human_report import build_human_report
 from llm_rag.explanation_contracts import prepare_explanation_inputs
 
 
@@ -97,11 +98,16 @@ def main(argv=None):
                     report_inputs = prepare_explanation_inputs(batch.request, diagnosis_id=card.diagnosis_id, ml2_details=batch.details())
                     staff = recommend_for_staff(report_inputs, app.pairs, provider=report_renderer)
                     usage = dict(classification=classifier.stats, explanation=renderer.stats, staff_report=report_renderer.stats)
-                    report = write_report(target, path.name, app, usage, batch.request.items, staff_report=staff)
+                    human = build_human_report(path.name, app, batch.request.items, staff_report=staff, diagnosis=batch.request.diagnosis)
+                    report = write_report(target, path.name, app, usage, batch.request.items, human_report=human)
                     record = dict(file=path.name, input_sha256=input_digest,
                         registry_version=registry.version, created_at=datetime.now(timezone.utc).isoformat(),
                         usage=usage, ml2_details=batch.details(), evidence_snapshots=snapshots,
-                        application=app.model_dump(mode='json'), staff_report=staff.model_dump(mode='json'))
+                        application=app.model_dump(mode='json'), staff_report=staff.model_dump(mode='json'), human_report=human)
+                    diagnostic_log = dict(schema_version='diagnostics.1',
+                        staff_report=staff.diagnostics,
+                        api={name: stats.get('diagnostics', []) for name, stats in usage.items()})
+                    (target / 'diagnostics.json').write_text(json.dumps(diagnostic_log, ensure_ascii=False, indent=2), encoding='utf-8')
                     (target / 'result.json').write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
                     for item, pair in zip(batch.request.items, app.pairs):
                         print(f'  {item.original.trade_name}: МНН={item.inn or "не установлен"}; '
@@ -113,6 +119,8 @@ def main(argv=None):
                     print(f'  GigaChat: классификация {classifier.stats["calls"]} вызовов, {classifier.stats["tokens"]} токенов; '
                           f'оформление {renderer.stats["calls"]} вызовов, {renderer.stats["tokens"]} токенов.')
                     print(f'  Рекомендация сотруднику: {staff.generation_status}; {report_renderer.stats["tokens"]} токенов.')
+                    if staff.diagnostics:
+                        print('  Диагностика: ' + staff.diagnostics[0]['code'] + '; ' + str(target / 'diagnostics.json'))
                     print(f'  Отчёт: {report}', flush=True)
                 except Exception:
                     technical_errors = True
