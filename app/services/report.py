@@ -10,6 +10,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.config import CATEGORY_LABELS, REVIEW_REASON_LABELS, TRAFFIC_LIGHT_COLORS
 from app.schemas.application_api import ApplicationCard
+from app.services.presentation import humanize_warning_text
 
 _HEADER_FILL = PatternFill("solid", fgColor="D9E2F3")
 _REVIEW_FILL = PatternFill("solid", fgColor="FFF2CC")
@@ -136,7 +137,7 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
                     reason,
                     check.source if check else None,
                     check.reference_version if check else None,
-                    check.comment if check else None,
+                    humanize_warning_text(check.comment) if check else None,
                 ],
             )
             if needs_review:
@@ -151,7 +152,7 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
             warnings,
             [
                 _LEVEL_LABELS.get(issue.level, issue.level),
-                issue.message,
+                humanize_warning_text(issue.message),
                 issue.row,
                 issue.column,
             ],

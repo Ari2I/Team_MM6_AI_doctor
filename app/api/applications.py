@@ -34,6 +34,7 @@ from app.schemas.application_api import (
 )
 from app.services.analysis import analyze_application
 from app.services.excel_parser import ExcelParseError, parse_excel
+from app.services.presentation import humanize_warning_text
 from app.services.report import build_report
 from app.services.validator import validate_file, validate_parse_result
 
@@ -107,7 +108,7 @@ def _card(application: Application) -> ApplicationCard:
                 else None,
                 source=check.source,
                 reference_version=check.reference_version,
-                comment=check.comment,
+                comment=humanize_warning_text(check.comment),
                 needs_review=check.needs_review,
                 review_reason=check.review_reason,
             )
@@ -123,8 +124,10 @@ def _card(application: Application) -> ApplicationCard:
                 checks=checks,
             )
         )
+    details = ApplicationDetails.model_validate(application)
+    details.warning_message = humanize_warning_text(details.warning_message)
     return ApplicationCard(
-        application=ApplicationDetails.model_validate(application),
+        application=details,
         disclaimer=DISCLAIMER,
         diagnoses=[diagnosis.name for diagnosis in application.diagnoses],
         items=items,

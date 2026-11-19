@@ -8,6 +8,7 @@ from typing import Any, NamedTuple
 
 from app.config import get_traffic_light_settings
 from app.models.enums import DrugCategory, TrafficLight
+from app.services.presentation import position_word, review_reason_label
 
 _ORDER = (DrugCategory.A, DrugCategory.B, DrugCategory.V)
 
@@ -131,5 +132,6 @@ def build_warning_message(checks: Iterable[Any]) -> str | None:
             if _value(check, "review_reason")
         }
     )
-    suffix = ", ".join(reasons) if reasons else "требуется уточнение"
-    return f"Для {count} позиций требуется проверка человеком: {suffix}."
+    suffix = "; ".join(dict.fromkeys(review_reason_label(reason).rstrip(".") for reason in reasons))
+    suffix = suffix or "причина требует уточнения специалистом"
+    return f"Для {count} {position_word(count)} требуется проверка человеком: {suffix}."
