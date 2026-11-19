@@ -35,19 +35,19 @@
     {
       "mnn": "демо-вещество-а",
       "diagnosis_id": "demo",
-      "category": "A",
+      "category": "А",
       "source": "Синтетический corpus demo-2026-10-18.1, master-demo/master-a/category-a; не клинические рекомендации"
     },
     {
       "mnn": "демо-вещество-б",
       "diagnosis_id": "demo",
-      "category": "B",
+      "category": "Б",
       "source": "Синтетический corpus demo-2026-10-18.1, master-demo/master-b/category-b; не клинические рекомендации"
     },
     {
       "mnn": "демо-вещество-в",
       "diagnosis_id": "demo",
-      "category": "V",
+      "category": "В",
       "source": "Синтетический corpus demo-2026-10-18.1, master-demo/master-c/category-c; не клинические рекомендации"
     }
   ]

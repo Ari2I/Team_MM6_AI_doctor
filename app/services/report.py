@@ -70,7 +70,7 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
     summary["B4"].fill = PatternFill("solid", fgColor=TRAFFIC_LIGHT_COLORS[color])
     _append(summary, ["Диагнозы заявки", "\n".join(card.diagnoses)])
     shares = application.category_shares or {}
-    for category in ("A", "B", "V", "undetermined"):
+    for category in ("А", "Б", "В", "undetermined"):
         _append(summary, [f"Доля суммы: {CATEGORY_LABELS[category]}", shares.get(category)])
         summary.cell(summary.max_row, 2).number_format = '0.00"%"'
     _append(summary, ["Резюме", application.summary])

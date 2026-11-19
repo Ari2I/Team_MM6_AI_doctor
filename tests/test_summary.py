@@ -27,17 +27,17 @@ def test_category_shares_ignore_non_positive_and_missing_amounts() -> None:
             {"amount": None, "best_category": DrugCategory.V},
         ]
     )
-    assert shares["A"] == 80
+    assert shares["А"] == 80
     assert shares["undetermined"] == 20
     assert shares["total_amount"] == 100
 
 
 def test_traffic_light_boundary_and_review() -> None:
-    assert compute_traffic_light({"A": 80, "undetermined": 0}, False).color is TrafficLight.RED
-    assert compute_traffic_light({"A": 80.01, "undetermined": 0}, False).color is TrafficLight.GREEN
-    assert compute_traffic_light({"A": 90, "undetermined": 0}, True).color is TrafficLight.YELLOW
+    assert compute_traffic_light({"А": 80, "undetermined": 0}, False).color is TrafficLight.RED
+    assert compute_traffic_light({"А": 80.01, "undetermined": 0}, False).color is TrafficLight.GREEN
+    assert compute_traffic_light({"А": 90, "undetermined": 0}, True).color is TrafficLight.YELLOW
 
 
 def test_traffic_light_undetermined_share() -> None:
-    result = compute_traffic_light({"A": 0, "undetermined": 50}, False)
+    result = compute_traffic_light({"А": 0, "undetermined": 50}, False)
     assert result.color is TrafficLight.UNDETERMINED

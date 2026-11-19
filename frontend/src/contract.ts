@@ -1,7 +1,7 @@
 // Mirrors app/schemas/application_api.py; extra response fields are allowed.
 export type Light = 'green' | 'yellow' | 'red' | 'undetermined'
-export type Category = 'A' | 'B' | 'V'
-export const CATEGORY_LABELS = { A: 'А', B: 'Б', V: 'В', undetermined: 'не определена' } as const
+export type Category = 'А' | 'Б' | 'В'
+export const CATEGORY_LABELS = { А: 'А', Б: 'Б', В: 'В', undetermined: 'не определена' } as const
 export type Issue = {
   level: string; code: string; message: string; row?: number | null; column?: string | null
 }
@@ -57,7 +57,7 @@ export function isIssue(value: unknown): value is Issue {
 }
 function isCheck(value: unknown): value is CheckDetails {
   return isRecord(value) && isString(value.diagnosis) &&
-    (value.category == null || oneOf(value.category, ['A', 'B', 'V'])) &&
+    (value.category == null || oneOf(value.category, ['А', 'Б', 'В'])) &&
     ['category_label', 'source', 'reference_version', 'comment', 'review_reason']
       .every(key => optionalString(value[key])) && typeof value.needs_review === 'boolean'
 }

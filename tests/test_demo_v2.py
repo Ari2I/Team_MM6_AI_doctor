@@ -30,9 +30,8 @@ CASES = [
 def test_rules_match_only_unconditional_corpus_assertions() -> None:
     document = read_reference(REFERENCE)
     corpus = json.loads((ROOT / "ai/examples/corpus.json").read_text(encoding="utf-8"))
-    categories = {"А": "A", "Б": "B", "В": "V"}
     expected = {
-        (fragment["inn"], fragment["diagnosis"], categories[assertion["category"]])
+        (fragment["inn"], fragment["diagnosis"], assertion["category"])
         for fragment in corpus["fragments"]
         if not fragment["required_context"]
         for assertion in fragment["assertions"]
@@ -133,6 +132,6 @@ def test_demo_analysis(
     if filename == "two_diagnoses.xlsx":
         assert len(card["diagnoses"]) == 2
         assert len(card["items"][0]["checks"]) == 2
-        assert {c["category"] for c in card["items"][0]["checks"]} == {"A", None}
+        assert {c["category"] for c in card["items"][0]["checks"]} == {"А", None}
     saved = demo_client.get(f"/applications/{application['id']}")
     assert saved.json() == card

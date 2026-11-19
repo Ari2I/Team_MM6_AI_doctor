@@ -37,6 +37,37 @@ FastAPI/PostgreSQL принимает XLSX, сопоставляет препа�
 если `demo-api-1` уже импортирована с `--activate`. Том `postgres_data` сохраняет БД.
 `docker compose down` останавливает стек без удаления данных.
 
+## Коды категорий и обновление существующей БД
+
+Во всём контракте используются русские **А / Б / В**: `category`, справочники,
+ответы API и ключи `category_shares`: `А`, `Б`, `В`, `А_amount`, `Б_amount`,
+`В_amount`. `undetermined`, `undetermined_amount` и `total_amount` сохраняют
+свои имена. Латинские `A/B/V` больше не принимаются как категории.
+Имена атрибутов Python enum (`DrugCategory.A/B/V`) остаются идентификаторами кода;
+их значения и JSON-представление — кириллические.
+
+Миграция `f6a7b8c9d0e1` переименовывает значения PostgreSQL enum без удаления
+проверок и правил справочника, переносит ключи сохранённых долей и заменяет
+буквы в шаблонных резюме. Суммы, статусы и остальные тексты не пересчитываются.
+Произвольные резюме сохраняются. При одновременном наличии старого и нового
+ключей долей миграция прерывается, чтобы не потерять неоднозначные данные.
+Предыдущие миграции сохранены; downgrade возвращает старые коды.
+
+Обновляйте backend, frontend и БД вместе. Для текущего запуска с сертификатом
+выполните из корня проекта (PostgreSQL должен работать):
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.certs.yml build api web
+docker compose -f docker-compose.yml -f docker-compose.certs.yml stop api web
+docker compose -f docker-compose.yml -f docker-compose.certs.yml run --rm --no-deps api alembic upgrade head
+docker compose -f docker-compose.yml -f docker-compose.certs.yml up -d --no-deps --force-recreate --wait api web
+```
+
+Переходите к следующей команде только после успешного завершения предыдущей.
+Повторно импортировать уже установленную версию справочника не нужно: миграция
+обновляет её категории на месте. Старые JSON-файлы для нового импорта необходимо
+перевести с `A/B/V` на `А/Б/В`.
+
 ## Режимы показа
 
 **«Как собрано из веток» (без пароля).** В `.env` оставьте `WEB_USER=` и
@@ -115,7 +146,7 @@ docker compose exec -T api python -m app.scripts.import_reference data/reference
 
 | Файл в `data/demo/` | Ожидаемый индикатор | Позиций на проверку | Причины |
 | --- | --- | --- | --- |
-| `correct.xlsx` | green | 0 | Нет; суммы A/B/V = 900/50/50 |
+| `correct.xlsx` | green | 0 | Нет; суммы А/Б/В = 900/50/50 |
 | `typo.xlsx` | yellow | 1 | DRUG_AMBIGUOUS: «Сальбутамал» вместо «Сальбутамол» |
 | `unknown.xlsx` | undetermined | 1 | DRUG_NOT_FOUND; неизвестная позиция составляет 90% суммы |
 | `two_diagnoses.xlsx` | yellow | 2 | NO_RULE_FOR_PAIR; всего 4 проверки пар |
@@ -130,7 +161,7 @@ docker compose exec -T api python -m app.scripts.import_reference data/reference
 
 - `ai/examples/corpus.json`, версия `demo-2026-10-18.1`: точные МНН
   `демо-вещество-а`, `демо-вещество-б`, `демо-вещество-в` + «Демо-диагноз»
-  имеют безусловные утверждения А/Б/В. В backend это A/B/V. Источник правила
+  имеют безусловные утверждения А/Б/В. Backend использует те же коды А/Б/В. Источник правила
   содержит версию corpus и идентификаторы source/fragment/claim.
 - `демо-условное` + «Демо-диагноз» имеет только условное утверждение Б при
   `demo_marker=present`. Согласованное допущение: препарат включён как «Симбикорт Турбухалер»,
@@ -394,7 +425,7 @@ Template-образ исходников AI не содержит и работ�
 Пример карточки: [docs/offline-card-example.json](docs/offline-card-example.json),
 `data/demo/correct.xlsx`, demo-api-2, offline. Получен настоящими парсером,
 правилами, Pipeline и API mapper с подменой хранения в памяти; не является
-подтверждением PostgreSQL roundtrip. A/B/V = 900/50/50, индикатор green, все три
+подтверждением PostgreSQL roundtrip. А/Б/В = 900/50/50, индикатор green, все три
 локальные категории и версия сохранены, добавлены извлечённые пояснения corpus.
 
 Допущения и нерешённое:

@@ -21,10 +21,15 @@ const apiSource = await moduleUrl('../src/api.ts', [
 const { loadApplication, uploadApplication, downloadReport } = await import(apiSource)
 const sample = JSON.parse(await readFile(new URL('../../sample_api_response.json', import.meta.url), 'utf8'))
 
-test('accepts actual backend sample and maps Latin categories', () => {
+test('accepts actual backend sample with Cyrillic categories', () => {
   assert.deepEqual(parseApplicationCard(sample), sample)
-  assert.equal(CATEGORY_LABELS.B, 'Б')
-  assert.equal(CATEGORY_LABELS.V, 'В')
+  assert.equal(CATEGORY_LABELS.Б, 'Б')
+  assert.equal(CATEGORY_LABELS.В, 'В')
+  for (const category of ['А', 'Б', 'В']) {
+    const card = structuredClone(sample)
+    card.items[0].checks[0].category = category
+    assert.equal(parseApplicationCard(card).items[0].checks[0].category, category)
+  }
 })
 test('rejects old contract, malformed nested checks, invalid categories and amounts', () => {
   for (const bad of [null, {}, { application_id: 'old' },
@@ -32,7 +37,7 @@ test('rejects old contract, malformed nested checks, invalid categories and amou
     assert.throws(() => parseApplicationCard(bad), { message: CONTRACT_ERROR })
   }
   for (const patch of [{ checks: null }, { amount: 'not money' },
-    { checks: [{ ...sample.items[0].checks[0], category: 'Б' }] },
+    ...['A', 'B', 'V', 'Г'].map(category => ({ checks: [{ ...sample.items[0].checks[0], category }] })),
     { checks: [{ ...sample.items[0].checks[0], needs_review: 'yes' }] }]) {
     const bad = structuredClone(sample)
     Object.assign(bad.items[0], patch)

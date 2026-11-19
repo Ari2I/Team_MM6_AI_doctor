@@ -18,11 +18,11 @@ class TrafficLight(StrEnum):
 
 
 class DrugCategory(StrEnum):
-    """Латинские A / B / V соответствуют русским категориям А / Б / В."""
+    """Коды категорий в API, справочниках и PostgreSQL: А / Б / В."""
 
-    A = "A"
-    B = "B"
-    V = "V"
+    A = "А"
+    B = "Б"
+    V = "В"
 
 
 class ReviewReason(StrEnum):

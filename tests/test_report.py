@@ -30,9 +30,9 @@ def card() -> dict[str, Any]:
             "summary": "Резюме анализа",
             "warning_message": "Нужна проверка",
             "category_shares": {
-                "A": 70.0,
-                "B": 20.0,
-                "V": 5.0,
+                "А": 70.0,
+                "Б": 20.0,
+                "В": 5.0,
                 "undetermined": 5.0,
             },
         },
@@ -46,7 +46,7 @@ def card() -> dict[str, Any]:
                 "checks": [
                     {
                         "diagnosis": "Диагноз 1",
-                        "category": "A",
+                        "category": "А",
                         "needs_review": False,
                         "source": "Правило",
                         "reference_version": "demo-1",
@@ -83,7 +83,7 @@ def test_report_contents(card: dict[str, Any]) -> None:
         "Препарат",
         "МНН",
         "Диагноз 1",
-        CATEGORY_LABELS["A"],
+        CATEGORY_LABELS["А"],
         "Проверено правилом",
         None,
         "Правило",
@@ -99,7 +99,7 @@ def test_report_contents(card: dict[str, Any]) -> None:
     fields = dict(summary.values)
     assert fields["Дата создания заявки"] == "2026-11-06T05:00:00+00:00"
     assert fields["Диагнозы заявки"] == "Диагноз 1\nДиагноз 2"
-    assert fields["Доля суммы: " + CATEGORY_LABELS["A"]] == 70
+    assert fields["Доля суммы: " + CATEGORY_LABELS["А"]] == 70
     assert fields["Резюме"] == "Резюме анализа"
     assert fields["Предупреждение"] == "Нужна проверка"
     assert fields["Версия справочника"] == "demo-1"
