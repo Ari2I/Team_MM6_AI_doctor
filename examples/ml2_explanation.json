@@ -5,7 +5,6 @@
       "item_id": "row-1",
       "diagnosis_id": "synthetic-d1",
       "schema_version": "explanation.1",
-      "is_demo": true,
       "diagnosis": "Демо-диагноз",
       "inn": "демо-вещество-а",
       "category": "А",
@@ -45,7 +44,6 @@
       "item_id": "row-2",
       "diagnosis_id": "synthetic-d1",
       "schema_version": "explanation.1",
-      "is_demo": true,
       "diagnosis": "Демо-диагноз",
       "inn": "демо-вещество-б",
       "category": "Б",
@@ -116,28 +114,24 @@
   },
   "approved_corpus": {
     "corpus_version": "demo-2026-10-18.1",
-    "is_demo": true,
     "sources": [
       {
         "source_id": "master-demo",
         "title": "Синтетический Master List — не медицинский источник",
         "source_type": "MASTER_LIST",
-        "version": "demo-1",
-        "is_demo": true
+        "version": "demo-1"
       },
       {
         "source_id": "protocol-demo",
         "title": "Синтетический протокол — не медицинский источник",
         "source_type": "PROTOCOL",
-        "version": "demo-1",
-        "is_demo": true
+        "version": "demo-1"
       },
       {
         "source_id": "dosage-demo",
         "title": "Синтетические правила дозировок — не медицинский источник",
         "source_type": "DOSAGE",
-        "version": "demo-1",
-        "is_demo": true
+        "version": "demo-1"
       }
     ],
     "fragments": [

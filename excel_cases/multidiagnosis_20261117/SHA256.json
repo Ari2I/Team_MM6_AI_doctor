@@ -1,0 +1,12 @@
+{
+  "single.xlsx": "4d29a6e7cb37d08a2684ab67f1fd240c07cb02b245134f38cd3be14d2ddaa00a",
+  "two.xlsx": "8b1441a73c0c143d43a71bede4dfffe13e1bc5067f7b6af9312c7c30583c42d1",
+  "ten.xlsx": "1ab4a20f813bc4e81e7780ceed0690612082f03b5e0219985e015600a4c97864",
+  "fifty.xlsx": "f0953e04826c7d9c5f8af9c1d770b9166ecbe3fd1a47db50a973586e4410123b",
+  "unknown.xlsx": "fe9d4f150344293a0bfcef671b23d9fce8b3133c20fe3555313eb826ce57bf6e",
+  "missing_condition.xlsx": "a90068e6445bb15cb184fcd87d56843f6d2c0f9e156284578fe81399ea597263",
+  "form_mismatch.xlsx": "c4b3cda802d866914c4cf8d8486a03fb2f96bb7c637df872502ae32980889a6d",
+  "currencies.xlsx": "58b145dd9160020a95cb6c06176d29d6d1bedc50eebaa6b68ea85a3b0e2b14f1",
+  "invalid_link.xlsx": "c6f1e29d25e520efbbea56e0ddb17d2dfc568fef2c9d7654925d19a947e68f0c",
+  "duplicate_id.xlsx": "ab299e6286f250b544c421b93a0572cc7192f396cc02ee3a9e7aa4e273f6f40d"
+}

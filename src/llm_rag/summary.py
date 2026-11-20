@@ -40,7 +40,7 @@ def build_summary(items: list[ItemResult]) -> tuple[str, list[SummaryRef], str, 
         "PARTIAL": "Анализ неполный: часть результатов требует экспертного рассмотрения.",
         "UNRESOLVED": "Анализ не завершён: подтверждённые объяснения отсутствуют, требуется экспертное рассмотрение.",
     }[completeness]
-    lines = [heading, "Демонстрационные данные; медицинская корректность для реальных пациентов не проверялась."]
+    lines = [heading, "Медицинская применимость требует независимой проверки."]
     refs = []
     for item in items:
         lines.append(f"Позиция {item.item_id}: {item.explanation_status}.")

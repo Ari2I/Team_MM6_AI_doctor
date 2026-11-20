@@ -92,7 +92,7 @@ def build_human_report(name, app, items, *, staff_report=None, diagnosis=None):
                 'OFFLINE': 'Рекомендации подготовлены по доступным сведениям.'}[staff_report.generation_status]
     classified = sum(p.category is not None for p in app.pairs)
     return dict(schema_version='human-report.1', title='Проверка заявки: ' + name,
-        notice='Учебная карточка с реальными названиями. Классификация по клиническим рекомендациям. Решение о выплате принимает специалист. Дозировка не оценивалась.',
+        notice='Классификация по клиническим рекомендациям. Решение о выплате принимает специалист. Дозировка не оценивалась.',
         summary=f'Категория назначена для {classified} из {len(app.pairs)} позиций.',
         recommendation_note=note, review_note='Применимость оснований к заявителю требует сверки специалистом.',
         items=rows, costs=[dict(amount=str(c.known_total_amount), currency=c.currency,

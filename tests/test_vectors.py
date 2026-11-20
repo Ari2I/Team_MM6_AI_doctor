@@ -5,7 +5,7 @@ import pytest
 
 from llm_rag.contracts import AnalysisRequest
 from llm_rag.corpus import Corpus
-from llm_rag.providers import DemoProvider
+from llm_rag.providers import TemplateProvider
 from tests.helpers import corpus_data, request_data
 
 
@@ -100,7 +100,7 @@ def test_low_vector_score_does_not_hide_a_conflicting_source():
         assertion[key] = assertion[key].replace("категории А", "категории Б")
     conflict["text"] = conflict["text"].replace("категории А", "категории Б")
     corpus["fragments"].append(conflict)
-    result = Pipeline(Corpus.model_validate(corpus), DemoProvider(), embedder=FixedEmbedder()).run(
+    result = Pipeline(Corpus.model_validate(corpus), TemplateProvider(), embedder=FixedEmbedder()).run(
         AnalysisRequest.model_validate(request_data())
     )
     assert result.items[0].explanation_status == "SOURCE_CONFLICT"
@@ -115,7 +115,7 @@ def test_low_vector_score_does_not_hide_a_conflicting_source():
 def test_corpus_vectors_are_built_once_and_queries_are_encoded_per_item():
     from llm_rag.pipeline import Pipeline
     embedder = FixedEmbedder()
-    pipeline = Pipeline(Corpus.model_validate(corpus_data()), DemoProvider(), embedder=embedder)
+    pipeline = Pipeline(Corpus.model_validate(corpus_data()), TemplateProvider(), embedder=embedder)
     request = AnalysisRequest.model_validate(request_data())
     first = pipeline.run(request)
     second = pipeline.run(request)
@@ -144,7 +144,7 @@ def test_embedder_dimension_metadata_cannot_disagree_with_real_vectors():
 
 def test_lexical_mode_reports_that_no_embedding_model_was_used():
     from llm_rag.pipeline import Pipeline
-    result = Pipeline(Corpus.model_validate(corpus_data()), DemoProvider()).run(
+    result = Pipeline(Corpus.model_validate(corpus_data()), TemplateProvider()).run(
         AnalysisRequest.model_validate(request_data())
     )
     assert result.retrieval_info.method == "lexical"
@@ -152,13 +152,13 @@ def test_lexical_mode_reports_that_no_embedding_model_was_used():
 
 
 def test_empty_embedding_batch_does_not_load_optional_libraries():
-    from llm_rag.embeddings import LocalMultilingualEmbedder
-    embedder = LocalMultilingualEmbedder()
+    from llm_rag.embeddings import GigaChatEmbedder
+    embedder = GigaChatEmbedder()
     assert embedder.embed_documents([]) == []
 
 
 @pytest.mark.parametrize("kwargs", [{"batch_size": 0}, {"batch_size": True}, {"batch_size": -2}])
 def test_local_embedder_rejects_invalid_batch_configuration(kwargs):
-    from llm_rag.embeddings import LocalMultilingualEmbedder
+    from llm_rag.embeddings import GigaChatEmbedder
     with pytest.raises(ValueError):
-        LocalMultilingualEmbedder(**kwargs)
+        GigaChatEmbedder(**kwargs)

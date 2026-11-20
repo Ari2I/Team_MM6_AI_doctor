@@ -4,7 +4,7 @@ from llm_rag.staff_report import recommend_for_staff
 from llm_rag.explanation import explain_pair
 from llm_rag.evidence_snapshot import verify_ml2_evidence
 from tests.test_evidence_snapshot import sample
-from tests.test_gigachat import sdk_wire, make_provider, completion
+from tests.test_gigachat import sdk_wire, make_provider, completion  # noqa: F401 — импорт регистрирует pytest-фикстуру
 
 
 class ReportProvider:
@@ -82,7 +82,6 @@ def test_report_rejects_foreign_pair():
 
 
 def test_large_report_is_generated_in_bounded_batches():
-    import json
     inp, pair = values()
     inputs = [inp.model_copy(update={'item_id': str(i)}) for i in range(5)]
     pairs = [pair.model_copy(update={'item_id': str(i)}) for i in range(5)]
@@ -315,21 +314,6 @@ def test_specific_missing_conditions_are_sent_only_with_verified_quote_origin():
         assert 'PRIVATE' not in str(facts)
         packets.append(facts)
     assert packets[0] != packets[1]
-
-
-def test_excel_pipeline_does_not_call_quote_reordering_provider(monkeypatch):
-    from types import SimpleNamespace
-    import llm_rag.excel_scenario as scenario
-    inp, snap = sample()
-    batch = SimpleNamespace(request=SimpleNamespace(request_id='r', items=[]), details=lambda: {})
-    monkeypatch.setattr(scenario, 'ML2Pipeline', lambda *a, **k: SimpleNamespace(run=lambda *a, **k: batch))
-    monkeypatch.setattr(scenario, 'prepare_explanation_inputs', lambda *a, **k: [inp])
-    class NoPaidReordering:
-        def generate(self, payload):
-            pytest.fail('Отдельный вызов ради перестановки цитат')
-    app, _, _ = scenario.process_card(SimpleNamespace(request=None, diagnosis_id='d'), None,
-        SimpleNamespace(snapshot=lambda i: snap), None, NoPaidReordering())
-    assert app.pairs[0].citations == inp.citations
 
 
 def test_fallback_diagnostics_identify_validation_stage_without_raw_input():

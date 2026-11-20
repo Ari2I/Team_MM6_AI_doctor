@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import asdict, dataclass, replace
+from .official import ClinicalSources, SelectionError, select_edition
 
 import httpx
 
@@ -21,11 +21,8 @@ from .classifier import (
     classify_pair,
 )
 from .clinicalrecs import (
-    DEFAULT_CACHE,
     CatalogCandidate,
-    fetch_recommendation,
     fragments_for_inn,
-    recommendations_for_diagnosis,
 )
 from .registry import RegistryIndex, RegistrySnapshot, canonical_code, inn_key, name_key
 
@@ -56,21 +53,6 @@ class ML2Batch:
                 for value in self.evaluations
             ],
         }
-
-
-class ClinicalSources:
-    """Доступ к публичному каталогу и карточкам, только при явном live_sources=True."""
-
-    def __init__(self, cache: Path = DEFAULT_CACHE):
-        self.cache = cache
-
-    def candidates(self, code: str, age_group: str | None):
-        return recommendations_for_diagnosis(
-            code, age_group=age_group, cache_dir=self.cache
-        )
-
-    def load(self, candidate: CatalogCandidate):
-        return fetch_recommendation(candidate.page_url, cache_dir=self.cache)
 
 
 def _code(request: AnalysisRequest, explicit: str | None) -> str | None:
@@ -192,6 +174,21 @@ class ML2Pipeline:
             review_reason=matches[0][1].upstream_reason,
         )
 
+    def evaluate_pair(self, *, request_id, item_id, diagnosis, trade_name,
+                      dosage=None, context=None, fragments=()):
+        """Обработать узкую пару без искусственных денег и количества.
+
+        Только переданные фрагменты; сетевые загрузки этим методом запрещены.
+        Временные объекты содержат лишь поля, реально используемые ML-2.
+        """
+        from types import SimpleNamespace
+        request = SimpleNamespace(request_id=request_id, diagnosis=diagnosis,
+                                  context=dict(context or {}))
+        item = SimpleNamespace(item_id=item_id, original=SimpleNamespace(
+            trade_name=trade_name, dosage=dosage or ''))
+        return self._evaluate(request, item, _code(request, None), {},
+                              fragments_override=tuple(fragments))
+
     @staticmethod
     def _result(
         request, item, inn, status, reason, *, missing=(), citations=(), registry=()
@@ -210,7 +207,7 @@ class ML2Pipeline:
             review_reason=reason,
         )
 
-    def _evaluate(self, request, item, code, live_sources, catalog_cache):
+    def _evaluate(self, request, item, code, catalog_cache, *, fragments_override=None):
         drug = self.index.resolve(item.original.trade_name, item.original.dosage)
         registry = tuple(
             Citation(
@@ -267,108 +264,24 @@ class ML2Pipeline:
         rule = self._rule(request, item, inn)
         if rule is not None:
             return finish(rule, rule=rule.proposed_category is not None)
-        fragments = self.fragments.get(inn_key(inn), ())
+        fragments = (self.fragments.get(inn_key(inn), ()) if fragments_override is None
+                     else fragments_override)
         candidates, metadata = (), None
-        if not fragments and live_sources:
-            if not code:
-                return finish(
-                    self._result(
-                        request,
-                        item,
-                        inn,
-                        "NEEDS_CONTEXT",
-                        "Для поиска КР нужен код МКБ-10.",
-                        missing=["context.icd10"],
-                    )
-                )
+        if not fragments and fragments_override is None:
             age = _age_group(request.context)
             key = (code, age)
             if key not in catalog_cache:
-                catalog_cache[key] = tuple(self.sources.candidates(code, age))
+                catalog_cache[key] = tuple(self.sources.candidates(code, age)) if code else ()
             candidates = catalog_cache[key]
-            edition = request.context.get("recommendation_edition")
-            selected = [c for c in candidates if not edition or c.edition_id == edition]
-            if len(selected) != 1:
-                return finish(
-                    self._result(
-                        request,
-                        item,
-                        inn,
-                        "NEEDS_CONTEXT",
-                        "Не выбрана единственная применимая редакция КР.",
-                        missing=["age_group", "recommendation_edition"],
-                    ),
-                    candidates=candidates,
-                )
-            candidate = selected[0]
-            if candidate.cache_state == "STALE_CACHE":
-                return finish(
-                    self._result(
-                        request,
-                        item,
-                        inn,
-                        "NEEDS_REVIEW",
-                        "Каталог устарел; актуальность КР требует проверки.",
-                    ),
-                    candidates=candidates,
-                )
-            pop = name_key(candidate.population)
-            if (not age and pop not in {"взрослые, дети", "дети, взрослые"}) or (
-                age and name_key(age) not in pop
-            ):
-                return finish(
-                    self._result(
-                        request,
-                        item,
-                        inn,
-                        "NEEDS_CONTEXT",
-                        "Возрастная группа КР не подтверждена.",
-                        missing=["age_group"],
-                    ),
-                    candidates=candidates,
-                )
-            cached = self.sources.load(candidate)
+            try:
+                cached = select_edition(self.sources, candidates, code=code, age=age,
+                                        edition=request.context.get("recommendation_edition"))
+            except SelectionError as error:
+                return finish(self._result(request, item, inn, error.status, str(error), missing=error.missing),
+                              candidates=candidates)
             rec = cached.recommendation
-            metadata = {
-                "edition_id": rec.edition_id,
-                "version": rec.version,
-                "primary_url": rec.primary_url,
-                "page_url": rec.page_url,
-                "cache_state": cached.cache_state,
-            }
-            if (
-                not rec.is_current_ministry_copy
-                or rec.edition_id != candidate.edition_id
-                or rec.primary_url != candidate.primary_url
-                or rec.title != candidate.title
-                or rec.page_url != candidate.page_url
-                or not {code, code.split(".")[0]}.intersection(rec.icd10)
-                or (age and name_key(age) not in name_key(rec.population))
-                or name_key(rec.population) != pop
-            ):
-                return finish(
-                    self._result(
-                        request,
-                        item,
-                        inn,
-                        "NEEDS_REVIEW",
-                        "Паспорт или применимость редакции КР не подтверждены.",
-                    ),
-                    candidates=candidates,
-                    recommendation=metadata,
-                )
-            if cached.cache_state == "STALE_FALLBACK":
-                return finish(
-                    self._result(
-                        request,
-                        item,
-                        inn,
-                        "NEEDS_REVIEW",
-                        "Использована устаревшая резервная копия; классификация не назначена.",
-                    ),
-                    candidates=candidates,
-                    recommendation=metadata,
-                )
+            metadata = {"edition_id": rec.edition_id, "version": rec.version, "primary_url": rec.primary_url,
+                        "page_url": rec.page_url, "cache_state": cached.cache_state}
             fragments = fragments_for_inn(rec, inn)
         if not fragments:
             result = self._result(
@@ -387,6 +300,14 @@ class ML2Pipeline:
                 "Модель не включена; фрагменты требуют сверки.",
             )
         else:
+            original_ids={}
+            if len({f.fragment_id for f in fragments})!=len(fragments):
+                renamed=[]
+                for index,fragment in enumerate(fragments):
+                    alias=f'source-fragment-{index}'
+                    original_ids[(fragment.source_id,alias,fragment.version)]=fragment.fragment_id
+                    renamed.append(replace(fragment,fragment_id=alias))
+                fragments=tuple(renamed)
             context = {
                 k: v
                 for k, v in request.context.items()
@@ -403,6 +324,9 @@ class ML2Pipeline:
                 ),
                 self.complete,
             )
+            if original_ids:
+                result=replace(result,citations=tuple(replace(c,fragment_id=original_ids.get(
+                    (c.source_id,c.fragment_id,c.version),c.fragment_id)) for c in result.citations))
         return finish(result, candidates=candidates, recommendation=metadata)
 
     def run(
@@ -410,7 +334,6 @@ class ML2Pipeline:
         request: AnalysisRequest,
         *,
         diagnosis_code: str | None = None,
-        live_sources: bool = False,
     ) -> ML2Batch:
         request = AnalysisRequest.model_validate(request.model_dump())
         code = _code(request, diagnosis_code)
@@ -418,7 +341,7 @@ class ML2Pipeline:
         for item in request.items:
             try:
                 evaluation = self._evaluate(
-                    request, item, code, live_sources, catalog_cache
+                    request, item, code, catalog_cache
                 )
             except (OSError, ValueError, httpx.HTTPError):
                 # Не выводим сырые сетевые исключения и не ломаем остальные строки.
@@ -462,7 +385,6 @@ class ML2Pipeline:
             schema_version="1.0",
             request_id=request.request_id,
             diagnosis=request.diagnosis,
-            is_demo=True,
             context=dict(request.context),
             items=items,
         )

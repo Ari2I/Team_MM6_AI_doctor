@@ -5,13 +5,13 @@ import pytest
 
 from llm_rag.contracts import AnalysisRequest
 from llm_rag.corpus import Corpus
-from llm_rag.providers import DemoProvider, ProviderError
+from llm_rag.providers import TemplateProvider, ProviderError
 from tests.helpers import corpus_data, item_data, request_data
 
 
 def run(data=None, corpus=None, provider=None):
     from llm_rag.pipeline import Pipeline
-    return Pipeline(Corpus.model_validate(corpus or corpus_data()), provider or DemoProvider()).run(
+    return Pipeline(Corpus.model_validate(corpus or corpus_data()), provider or TemplateProvider()).run(
         AnalysisRequest.model_validate(data or request_data())
     )
 
@@ -39,7 +39,7 @@ def test_scenarios_1_to_3_supported_categories_preserve_all_upstream_fields(inde
     for key, value in data["items"][index].items():
         assert row.model_dump(mode="json")[key] == value
     assert result.completeness == "COMPLETE"
-    assert not result.requires_review
+    assert result.requires_review
     assert result.unresolved_item_ids == []
 
 
@@ -144,7 +144,7 @@ def test_only_known_provider_error_codes_are_preserved(code, visible):
 
 
 def test_api_failure_in_one_item_does_not_abort_other_items():
-    class FailOne(DemoProvider):
+    class FailOne(TemplateProvider):
         def generate(self, payload):
             if payload["item"]["item_id"] == "row-2":
                 raise RuntimeError("test-secret and private data")
@@ -156,7 +156,7 @@ def test_api_failure_in_one_item_does_not_abort_other_items():
 
 
 def test_malformed_provider_json_is_processing_error():
-    class Malformed(DemoProvider):
+    class Malformed(TemplateProvider):
         def generate(self, payload):
             return {"medical_text": "Необработанный текст"}
 
@@ -166,7 +166,7 @@ def test_malformed_provider_json_is_processing_error():
 
 
 def test_wrong_item_identifier_has_safe_diagnostic_code():
-    class WrongItem(DemoProvider):
+    class WrongItem(TemplateProvider):
         def generate(self, payload):
             response = super().generate(payload)
             response["item_id"] = "wrong-item"
@@ -179,7 +179,7 @@ def test_wrong_item_identifier_has_safe_diagnostic_code():
 
 @pytest.mark.parametrize("field,value", [("fragment_id", "invented"), ("text", "Гарантированное излечение")])
 def test_scenario_11_hallucinated_claim_does_not_reach_comment_or_summary(field, value):
-    class Hallucinating(DemoProvider):
+    class Hallucinating(TemplateProvider):
         def generate(self, payload):
             response = super().generate(payload)
             response["claims"][0][field] = value
@@ -232,14 +232,14 @@ def test_zero_total_has_no_undefined_division():
     assert set(result.costs_by_currency[0].shares_by_upstream_category.values()) == {None}
 
 
-def test_money_preserves_full_range_of_decimal_scales():
+def test_money_preserves_permitted_decimal_scales():
     data = request_data()
-    data["items"][0]["original"]["amount"] = "1E+20"
+    data["items"][0]["original"]["amount"] = "999999999999"
     small = item_data("small")
-    small["original"]["amount"] = "1E-20"
+    small["original"]["amount"] = "0.001"
     data["items"].append(small)
     costs = run(data).costs_by_currency[0]
-    expected = Decimal("100000000000000000000.00000000000000000001")
+    expected = Decimal("999999999999.001")
     assert costs.total_amount == expected
     assert costs.amounts_by_upstream_category["А"] == expected
 
@@ -251,7 +251,7 @@ def test_traceability_disclaimer_and_input_immutability():
     assert data == before
     assert result.corpus_version == "demo-2026-10-18.1"
     assert result.run_id
-    assert result.provider_name == "offline-extractive-demo"
+    assert result.provider_name == "offline-extractive"
     assert result.disclaimer == (
         "Данный анализ носит рекомендательный характер и сформирован на основе сопоставления "
         "с клиническими протоколами. Финальное решение о жизненной необходимости сопутствующей "

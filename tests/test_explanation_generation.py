@@ -55,7 +55,6 @@ def test_no_evidence_does_not_call_model():
 
 
 def test_model_orders_only_permitted_extracts():
-    from llm_rag.evidence_snapshot import EvidenceSnapshot
     inp, snap = sample()
     second = inp.citations[0].model_copy(update={'fragment_id': 'f2', 'quote': 'Вторая цитата.'})
     inp.citations.append(second)

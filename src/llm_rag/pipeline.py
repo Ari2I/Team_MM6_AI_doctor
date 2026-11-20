@@ -52,7 +52,7 @@ class Pipeline:
         text, refs, completeness, unresolved = build_summary(results)
         return AnalysisResult(
             request_id=request.request_id, diagnosis=request.diagnosis, items=results,
-            summary_text=text, summary_refs=refs, requires_review=bool(unresolved),
+            summary_text=text, summary_refs=refs, requires_review=True,
             unresolved_item_ids=unresolved, completeness=completeness,
             costs_by_currency=calculate_costs(request), corpus_version=self._corpus.corpus_version,
             run_id=str(uuid4()), provider_name=self._provider.name,

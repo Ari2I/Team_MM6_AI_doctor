@@ -1,7 +1,7 @@
 from llm_rag.contracts import AnalysisRequest
 from llm_rag.corpus import Corpus
 from llm_rag.evidence_snapshot import EvidenceSnapshot, verify_ml2_evidence
-from llm_rag.explanation import explain_pairs, render_explanation
+from llm_rag.explanation import explain_pairs
 from llm_rag.explanation_contracts import prepare_explanation_inputs, PurchaseAmount
 from llm_rag.explanation_summary import ExplainedApplication, summarize_explanations
 from llm_rag.ml2.pipeline import ML2Pipeline
@@ -37,9 +37,9 @@ def test_real_ml2_batch_to_json_and_old_pipeline():
         item_id=i.item_id, amount=i.original.amount, currency=i.original.currency) for i in batch.request.items])
     assert ExplainedApplication.model_validate_json(app.model_dump_json()) == app
     from llm_rag.pipeline import Pipeline
-    from llm_rag.providers.demo import DemoProvider
+    from llm_rag.providers.template import TemplateProvider
     old = AnalysisRequest.model_validate_json((ROOT / 'examples/request.json').read_bytes())
-    assert Pipeline(corpus, DemoProvider()).run(old).request_id == old.request_id
+    assert Pipeline(corpus, TemplateProvider()).run(old).request_id == old.request_id
 
 
 def test_pair_failure_isolated(monkeypatch):

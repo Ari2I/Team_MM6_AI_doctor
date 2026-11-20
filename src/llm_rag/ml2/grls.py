@@ -2,7 +2,7 @@
 
 Страница ГРЛС публикует ссылку на ZIP с датированной выгрузкой XLSX. Этот
 модуль только обнаруживает эту ссылку, проверяет архив и передаёт его уже
-импортёру собственного ML-2 пакета. В запросах заявок сайт ГРЛС не вызывается.
+импортёру собственного ML-2 пакета. Фасад сверяет выгрузку при обработке заявки.
 """
 
 from __future__ import annotations
@@ -21,12 +21,12 @@ from zipfile import BadZipFile, ZipFile
 import httpx
 
 from .registry import build_snapshot
+from llm_rag.integration_budget import source_timeout
+from llm_rag.rag_data import default_data_dir
 
 GRLS_PAGE = "https://grls.rosminzdrav.ru/GRLS.aspx"
 GRLS_HOST = "grls.rosminzdrav.ru"
-DEFAULT_CACHE = (
-    Path(__file__).resolve().parents[3] / ".local" / "official-inputs" / "grls"
-)
+DEFAULT_CACHE = default_data_dir()/'cache/grls'
 MAX_PAGE_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 _ARCHIVE_MEMBER = re.compile(r"grls(\d{4}-\d{2}-\d{2})-\d+-.+\.xlsx", re.IGNORECASE)
@@ -175,22 +175,27 @@ def _atomic_write(path: Path, payload: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def download_latest(cache: Path = DEFAULT_CACHE) -> tuple[Path, date, str]:
+def download_latest(cache: Path = DEFAULT_CACHE, *, deadline: float | None = None) -> tuple[Path, date, str]:
     """Скачать опубликованный ГРЛС ZIP, сохранив проверенный архив в локальный кэш."""
 
     headers = {
         "User-Agent": "Vrach-AI-ML2/1.0 (official registry import)",
         "Accept": "text/html,application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
     }
-    with httpx.Client(
-        headers=headers, timeout=httpx.Timeout(30, read=120), follow_redirects=True
-    ) as client:
-        response = client.get(GRLS_PAGE)
-        response.raise_for_status()
-        if len(response.content) > MAX_PAGE_BYTES:
-            raise ValueError("Страница поиска ГРЛС неожиданно велика.")
+    def timeout():
+        return httpx.Timeout(source_timeout(deadline, 30), read=source_timeout(deadline, 120))
+
+    with httpx.Client(headers=headers, follow_redirects=True) as client:
+        with client.stream("GET", GRLS_PAGE, timeout=timeout()) as response:
+            response.raise_for_status()
+            content = bytearray()
+            for chunk in response.iter_bytes():
+                source_timeout(deadline, 120)
+                content.extend(chunk)
+                if len(content) > MAX_PAGE_BYTES:
+                    raise ValueError("Страница поиска ГРЛС неожиданно велика.")
         parser = _ArchiveLinkParser()
-        parser.feed(response.text)
+        parser.feed(content.decode(response.encoding or "utf-8", errors="replace"))
         parser.close()
         if len(parser.candidates) != 1:
             raise ValueError(
@@ -199,12 +204,13 @@ def download_latest(cache: Path = DEFAULT_CACHE) -> tuple[Path, date, str]:
         relative_url, tooltip = parser.candidates[0]
         url = _safe_archive_url(relative_url)
         chunks = bytearray()
-        with client.stream("GET", url) as archive_response:
+        with client.stream("GET", url, timeout=timeout()) as archive_response:
             archive_response.raise_for_status()
             final_url = urlsplit(str(archive_response.url))
             if final_url.scheme != "https" or final_url.hostname != GRLS_HOST:
                 raise ValueError("Скачивание ГРЛС перенаправлено на неожиданный адрес.")
             for chunk in archive_response.iter_bytes():
+                source_timeout(deadline, 120)
                 chunks.extend(chunk)
                 if len(chunks) > MAX_ARCHIVE_BYTES:
                     raise ValueError("ZIP ГРЛС превысил допустимый размер.")
