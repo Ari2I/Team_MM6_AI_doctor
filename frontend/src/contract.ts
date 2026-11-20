@@ -2,6 +2,24 @@
 export type Light = 'green' | 'yellow' | 'red' | 'undetermined'
 export type Category = 'А' | 'Б' | 'В'
 export const CATEGORY_LABELS = { А: 'А', Б: 'Б', В: 'В', undetermined: 'не определена' } as const
+export const REVIEW_REASON_LABELS: Record<string, string> = {
+  DRUG_NOT_FOUND: 'Препарат не найден в справочнике.',
+  DRUG_AMBIGUOUS: 'Препарат сопоставлен неоднозначно.',
+  DIAGNOSIS_NOT_FOUND: 'Диагноз не найден в справочнике.',
+  NO_RULE_FOR_PAIR: 'Для пары препарат — диагноз нет правила.',
+  LOW_CONFIDENCE: 'Недостаточная уверенность сопоставления.',
+  CONFLICTING_CATEGORIES: 'Получены разные категории для диагнозов препарата.',
+  AI_INPUT_INCOMPLETE: 'Для анализа недостаточно исходных данных.',
+  AI_UNAVAILABLE: 'ИИ временно недоступен; требуется проверка специалистом.',
+  AI_TIMEOUT: 'ИИ не успел завершить обработку; требуется проверка специалистом.',
+  AI_INVALID_RESPONSE: 'Не удалось подтвердить результат ИИ; требуется проверка специалистом.',
+  AI_PRELIMINARY: 'Категория предложена ИИ и требует подтверждения специалистом.',
+  AI_REVIEW_REQUIRED: 'Результат ИИ требует проверки специалистом.',
+}
+export function reviewReasonLabel(reason?: string | null): string {
+  return reason && Object.hasOwn(REVIEW_REASON_LABELS, reason)
+    ? REVIEW_REASON_LABELS[reason] : 'Причина требует уточнения специалистом.'
+}
 export type Issue = {
   level: string; code: string; message: string; row?: number | null; column?: string | null
 }
@@ -32,6 +50,9 @@ export type ApplicationCard = {
     requires_review: boolean
     created_at: string
     summary?: string | null
+    reference_name?: string | null
+    reference_is_synthetic?: boolean | null
+    age_group?: 'adult' | 'child' | null
     warning_message?: string | null
     category_shares?: Record<string, number> | null
   }
@@ -74,6 +95,9 @@ export function parseApplicationCard(value: unknown): ApplicationCard {
       oneOf(app.status, ['uploaded', 'parsed', 'analyzed', 'error']) &&
       (app.traffic_light == null || oneOf(app.traffic_light, ['green', 'yellow', 'red', 'undetermined'])) &&
       typeof app.requires_review === 'boolean' && optionalString(app.summary) &&
+      optionalString(app.reference_name) &&
+      (app.reference_is_synthetic == null || typeof app.reference_is_synthetic === 'boolean') &&
+      (app.age_group == null || oneOf(app.age_group, ['adult', 'child'])) &&
       optionalString(app.warning_message) && (app.category_shares == null ||
         (isRecord(app.category_shares) && Object.values(app.category_shares).every(isNumber))) &&
       isString(value.disclaimer) && Array.isArray(value.diagnoses) && value.diagnoses.every(isString) &&

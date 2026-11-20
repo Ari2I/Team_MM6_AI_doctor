@@ -13,13 +13,23 @@ async function moduleUrl(path, replacements = []) {
   return 'data:text/javascript;base64,' + Buffer.from(outputText).toString('base64')
 }
 const contractUrl = await moduleUrl('../src/contract.ts')
-const { parseApplicationCard, CATEGORY_LABELS, CONTRACT_ERROR } = await import(contractUrl)
+const { parseApplicationCard, CATEGORY_LABELS, CONTRACT_ERROR, reviewReasonLabel, REVIEW_REASON_LABELS } = await import(contractUrl)
 const apiSource = await moduleUrl('../src/api.ts', [
   ["'./contract'", JSON.stringify(contractUrl)],
   ['import.meta.env.VITE_API_URL', "'https://backend.example.test/'"],
 ])
 const { loadApplication, uploadApplication, downloadReport } = await import(apiSource)
 const sample = JSON.parse(await readFile(new URL('../../sample_api_response.json', import.meta.url), 'utf8'))
+
+test('review reasons use readable labels, including unknown reasons', () => {
+  for (const reason of Object.keys(REVIEW_REASON_LABELS)) {
+    assert.doesNotMatch(reviewReasonLabel(reason), /\b[A-Z]+(?:_[A-Z]+)+\b/)
+  }
+  assert.match(reviewReasonLabel('AI_PRELIMINARY'), /подтверждения специалистом/)
+  for (const reason of ['NEW_INTERNAL_REASON', 'constructor', null, undefined]) {
+    assert.equal(reviewReasonLabel(reason), 'Причина требует уточнения специалистом.')
+  }
+})
 
 test('accepts actual backend sample with Cyrillic categories', () => {
   assert.deepEqual(parseApplicationCard(sample), sample)
@@ -55,6 +65,18 @@ test('accepts null and omitted nullable fields, all lights and error cards', () 
     assert.equal(parseApplicationCard(card).application.traffic_light, light)
   }
 })
+
+test('accepts reference provenance and rejects invalid metadata', () => {
+  for (const reference_is_synthetic of [true, false, null]) {
+    const card = structuredClone(sample)
+    card.application.reference_name = 'Рабочий справочник'
+    card.application.reference_is_synthetic = reference_is_synthetic
+    assert.deepEqual(parseApplicationCard(card), card)
+  }
+  const bad = structuredClone(sample)
+  bad.application.reference_is_synthetic = 'false'
+  assert.throws(() => parseApplicationCard(bad), { message: CONTRACT_ERROR })
+})
 test('GET and multipart POST use actual paths, base URL, repeated diagnoses', async t => {
   const calls = []
   t.mock.method(globalThis, 'fetch', async (...args) => {
@@ -78,6 +100,25 @@ test('errors[] preserves messages and coordinates', async t => {
     assert.deepEqual(error.issues, errors)
     return true
   })
+})
+
+test('upload passes explicit age group without inventing a default', async t => {
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(options.body.get('age_group'), 'child')
+    return Response.json(sample)
+  })
+  await uploadApplication(new File(['xlsx'], 'test.xlsx'), ['J45.9'], new AbortController().signal, 'child')
+})
+
+test('age group metadata accepts only the supported choices', () => {
+  for (const age_group of ['adult', 'child', null]) {
+    const card = structuredClone(sample)
+    card.application.age_group = age_group
+    assert.equal(parseApplicationCard(card).application.age_group, age_group)
+  }
+  const card = structuredClone(sample)
+  card.application.age_group = 'unknown'
+  assert.throws(() => parseApplicationCard(card), { message: CONTRACT_ERROR })
 })
 test('401 works with non-JSON body, including report download', async t => {
   t.mock.method(globalThis, 'fetch', async () => new Response('Unauthorized', { status: 401 }))

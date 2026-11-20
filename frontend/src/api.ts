@@ -29,10 +29,11 @@ async function readCard(response: Response) {
 export async function loadApplication(id: string, signal: AbortSignal) {
   return readCard(await fetchApi('/applications/' + encodeURIComponent(id), { signal }))
 }
-export async function uploadApplication(file: File, diagnoses: string[], signal: AbortSignal) {
+export async function uploadApplication(file: File, diagnoses: string[], signal: AbortSignal, ageGroup = '') {
   const body = new FormData()
   body.set('file', file)
   diagnoses.forEach(diagnosis => body.append('diagnoses', diagnosis))
+  if (ageGroup) body.set('age_group', ageGroup)
   return readCard(await fetchApi('/applications', { method: 'POST', body, signal }))
 }
 export async function downloadReport(id: string, signal: AbortSignal): Promise<void> {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
-import { CATEGORY_LABELS } from './contract'
+import { CATEGORY_LABELS, reviewReasonLabel } from './contract'
 import type { ApplicationCard, CheckDetails, Issue, Light } from './contract'
 import { downloadReport, loadApplication, uploadApplication, RequestError } from './api'
 import './style.css'
@@ -11,14 +11,6 @@ const money = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximum
 const percent = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
 const lights: Record<Light, string> = {
   green: 'Зелёный', yellow: 'Жёлтый', red: 'Красный', undetermined: 'Не определён — требуется проверка',
-}
-const reasons: Record<string, string> = {
-  DRUG_NOT_FOUND: 'Препарат не найден в справочнике',
-  DRUG_AMBIGUOUS: 'Неоднозначное сопоставление препарата',
-  DIAGNOSIS_NOT_FOUND: 'Диагноз не найден в справочнике',
-  NO_RULE_FOR_PAIR: 'Нет правила для пары препарат — диагноз',
-  LOW_CONFIDENCE: 'Недостаточная уверенность сопоставления',
-  CONFLICTING_CATEGORIES: 'Категории по диагнозам расходятся',
 }
 const columns: Record<string, string> = {
   drug_name: 'Препарат', mnn: 'МНН', amount: 'Сумма', diagnosis: 'Диагноз',
@@ -37,7 +29,7 @@ function CheckView({ check }: { check: CheckDetails }) {
     <small>Версия справочника: {check.reference_version ?? 'не указана'}</small>
     <p>Комментарий: {check.comment ?? 'не предоставлен'}</p>
     {check.needs_review && <div className="notice"><strong>Требует проверки</strong>
-      <p>{check.review_reason ? (reasons[check.review_reason] ?? check.review_reason) : 'Причина не указана'}</p></div>}
+      <p>{reviewReasonLabel(check.review_reason)}</p></div>}
   </div>
 }
 function ApplicationView({ result, busy, onDownload }: {
@@ -62,6 +54,9 @@ function ApplicationView({ result, busy, onDownload }: {
       </div>)}</div> : <p>Доли ещё не рассчитаны.</p>}
     {shares?.total_amount != null && <p>Общая сумма: {money.format(shares.total_amount)}</p>}
     <h3>Резюме</h3><p>{app.summary ?? 'Резюме пока не сформировано.'}</p>
+    {app.reference_name && <p>Справочник: {app.reference_name}</p>}
+    {app.age_group && <p>Возрастная группа: {app.age_group === 'adult' ? 'Взрослые' : 'Дети'}</p>}
+    {app.reference_is_synthetic === true && <p className="notice">Использован синтетический справочник. Результат требует проверки по рабочим источникам.</p>}
     {app.warning_message && <div className="notice"><strong>Предупреждение</strong><p>{app.warning_message}</p></div>}
     <h3>Диагнозы заявки</h3>
     {result.diagnoses.length ? <ul>{result.diagnoses.map((diagnosis, index) => <li key={index}>{diagnosis}</li>)}</ul> : <p>Диагнозы не указаны.</p>}
@@ -79,6 +74,7 @@ function ApplicationView({ result, busy, onDownload }: {
 function App() {
   const [file, setFile] = useState<File | null>(null)
   const [diagnoses, setDiagnoses] = useState('')
+  const [ageGroup, setAgeGroup] = useState('')
   const [result, setResult] = useState<ApplicationCard | null>(null)
   const [issues, setIssues] = useState<Issue[]>([])
   const [busy, setBusy] = useState(false)
@@ -124,20 +120,23 @@ function App() {
     event.preventDefault()
     if (!file) return
     setResult(null)
-    void request(signal => uploadApplication(file, diagnoses.split(/\r?\n/).map(value => value.trim()).filter(Boolean), signal))
+    void request(signal => uploadApplication(file, diagnoses.split(/\r?\n/).map(value => value.trim()).filter(Boolean), signal, ageGroup))
   }
   return <>
     <header><div className="header-content"><span className="brand-icon" aria-hidden="true">✚</span>
-      <div><strong>Врач</strong><small>Помощник комиссии по ТЖС</small></div><span className="demo-tag">Демонстрация</span></div></header>
+      <div><strong>Врач</strong><small>Помощник комиссии по ТЖС</small></div></div></header>
     <main><section className="intro"><div className="eyebrow">Материальная помощь</div><h1>Проверка расходов по диагнозам</h1>
       <p>Загрузите XLSX с препаратами и суммами. Читается первый лист. Диагноз можно указать в строке препарата или добавить к заявке ниже.</p></section>
-      <div className="notice"><strong>Справочник демонстрационный (синтетический).</strong>
-        <p>Результаты не являются клинической истиной. Анализ носит рекомендательный характер; решение принимает человек.</p></div>
+      <div className="notice"><p>Анализ носит рекомендательный характер; решение принимает человек. Если подтверждённого правила нет, результат требует ручной проверки.</p></div>
       <form className="upload" onSubmit={submit}><div className="upload-title"><h2>Загрузить заявку</h2></div>
         <div className="upload-fields"><label className="file-label">Файл заявки (.xlsx)
           <input type="file" accept=".xlsx" required onChange={event => choose(event.target.files?.[0] ?? null)}/></label>
           <label>Дополнительные диагнозы (необязательно, по одному на строку)
             <textarea rows={3} value={diagnoses} onChange={event => setDiagnoses(event.target.value)}/></label>
+          <label>Возрастная группа для выбора рекомендаций
+            <select value={ageGroup} onChange={event => setAgeGroup(event.target.value)}>
+              <option value="">Не указана</option><option value="adult">Взрослые</option><option value="child">Дети</option>
+            </select></label>
           <button className="button primary" type="submit" disabled={!file || busy}>{busy ? 'Обработка…' : 'Проверить заявку'}</button></div></form>
       {busy && <p role="status" className="notice">Запрос выполняется…</p>}
       {(issues.length > 0 || message) && <div role="alert" className="notice error">
