@@ -17,6 +17,7 @@ from app.schemas.validation import IssueLevel
 
 class Application(Base):
     __tablename__ = "applications"
+    age_group: Mapped[str | None] = mapped_column(Text)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     filename: Mapped[str] = mapped_column(Text)

@@ -48,10 +48,20 @@ def pairs_for_item(item_diagnosis: str | None, application_diagnoses: Iterable[s
 
 def _review(reason: ReviewReason, snapshot: ReferenceSnapshot) -> PairCheck:
     return PairCheck(
+        source=(
+            "Справочник не подключён"
+            if snapshot.reference_version == "unconfigured"
+            else f"Поиск по справочнику {snapshot.reference_version}: "
+            "подтверждённое правило не найдено"
+        ),
         reference_version=snapshot.reference_version,
         needs_review=True,
         review_reason=reason,
-        comment=_COMMENTS[reason],
+        comment=(
+            "Справочник не подключён: МНН и категория не определены. Требуется проверка человеком."
+            if snapshot.reference_version == "unconfigured"
+            else _COMMENTS[reason]
+        ),
     )
 
 
@@ -98,6 +108,10 @@ def check_pair(
         source=rule.source,
         reference_version=snapshot.reference_version,
         needs_review=False,
+        comment=(
+            f"По правилу справочника указана категория {rule.category.value}. "
+            f"Источник: {rule.source or 'не указан'}; версия: {snapshot.reference_version}."
+        ),
     )
 
 

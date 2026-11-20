@@ -172,8 +172,12 @@ class AISettings(BaseSettings):
     mode: Literal["template", "offline", "network"] = "template"
     pair_timeout_seconds: float = Field(default=20, gt=0, allow_inf_nan=False)
     application_timeout_seconds: float = Field(default=90, gt=0, allow_inf_nan=False)
-    corpus_path: str = "ai/examples/corpus.json"
-    demo_data: bool = False
+    # Optional legacy RAG corpus; ordinary analysis uses the active reference.
+    corpus_path: str = ""
+    # Paths in the API process/container, not CLI arguments. No implicit downloads.
+    registry_path: str = ""
+    clinical_cache_dir: str = ""
+    live_sources: bool = False
     # TODO: уточнить у аналитика валюту; backend пока не хранит валюту позиции.
     currency: str = Field(default="RUB", pattern=r"^[A-Z]{3}$")
 

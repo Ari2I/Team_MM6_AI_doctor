@@ -21,6 +21,7 @@ from app.models import (
     ApplicationItem,
     ApplicationStatus,
     ItemCheck,
+    ReferenceVersion,
     ValidationIssue,
 )
 from app.schemas.application_api import (
@@ -96,7 +97,7 @@ def _load_application(session: Session, application_id: UUID) -> Application | N
     )
 
 
-def _card(application: Application) -> ApplicationCard:
+def _card(application: Application, session: Session | None = None) -> ApplicationCard:
     items = []
     for item in sorted(application.items, key=lambda value: value.row_number):
         checks = [
@@ -126,6 +127,23 @@ def _card(application: Application) -> ApplicationCard:
         )
     details = ApplicationDetails.model_validate(application)
     details.warning_message = humanize_warning_text(details.warning_message)
+    versions = {
+        check.reference_version
+        for item in items
+        for check in item.checks
+        if check.reference_version
+    }
+    if session is not None and len(versions) == 1:
+        if next(iter(versions)).startswith("grls:"):
+            details.reference_name = "ГРЛС и клинические рекомендации"
+            details.reference_is_synthetic = False
+        else:
+            reference = session.scalar(
+                select(ReferenceVersion).where(ReferenceVersion.version.in_(versions))
+            )
+            if reference is not None:
+                details.reference_name = reference.name
+                details.reference_is_synthetic = reference.is_synthetic
     return ApplicationCard(
         application=details,
         disclaimer=DISCLAIMER,
@@ -153,8 +171,14 @@ def create_application(
             examples=[["Учебный диагноз 01"]],
         ),
     ] = None,
+    age_group: Annotated[
+        str | None, Form(description="Возрастная группа: adult или child; необязательно")
+    ] = None,
 ) -> ApplicationCard | JSONResponse:
     started = monotonic()
+    if age_group not in {None, "", "adult", "child"}:
+        file.file.close()
+        return _error("invalid_age_group", "Выберите возрастную группу: взрослые или дети.")
     settings = get_validation_settings()
     file_report = validate_file(file.filename or "", file.size or 0)
     if not file_report.is_valid:
@@ -178,7 +202,9 @@ def create_application(
         return _issues_response(report.issues)
 
     application = Application(
-        filename=file.filename or "application.xlsx", status=ApplicationStatus.PARSED
+        filename=file.filename or "application.xlsx",
+        status=ApplicationStatus.PARSED,
+        age_group=age_group or None,
     )
     application.diagnoses = [
         ApplicationDiagnosis(name=name)
@@ -222,7 +248,7 @@ def create_application(
     session.expire_all()
     loaded = _load_application(session, application.id)
     assert loaded is not None
-    return _card(loaded)
+    return _card(loaded, session)
 
 
 @router.get(
@@ -276,7 +302,7 @@ def get_application(
                 ]
             },
         )
-    return _card(application)
+    return _card(application, session)
 
 
 @router.get(
@@ -309,7 +335,7 @@ def get_application_report(
         )
     else:
         return Response(
-            content=build_report(_card(application)),
+            content=build_report(_card(application, session)),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
                 "Content-Disposition": f'attachment; filename="application-{application_id}.xlsx"'

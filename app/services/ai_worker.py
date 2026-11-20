@@ -45,7 +45,7 @@ def network_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Unsupported evidence")
     return {
         "schema_version": "1.0",
-        "is_demo": True,
+        "is_demo": payload.get("is_demo", False),
         "corpus_version": payload["corpus_version"],
         "item": {key: payload["item"][key] for key in NETWORK_ITEM_FIELDS},
         "evidence": [{key: entry[key] for key in EVIDENCE_FIELDS} for entry in payload["evidence"]],
@@ -96,8 +96,17 @@ def run_module(
     progress: Callable[..., None] | None = None,
 ) -> WorkerResult:
     """Ленивые импорты; template сюда не приходит и пакета не требует."""
-    if not settings.demo_data:
-        return WorkerResult(error=ReviewReason.AI_UNAVAILABLE.value)
+    if settings.registry_path or settings.clinical_cache_dir or settings.live_sources:
+        source = Path(__file__).resolve().parents[2] / "ai" / "src"
+        if source.is_dir():
+            sys.path.insert(0, str(source))
+        from app.services.ml2_analysis import analyze_pair
+
+        return analyze_pair(pair, local, settings, timeout, progress)
+    if not settings.corpus_path:
+        from app.services.standard_analysis import analyze_pair
+
+        return analyze_pair(pair, local, settings, timeout, progress)
     # Источники подключаются как библиотека без выполнения CLI, загрузки .env,
     # установки тяжёлых зависимостей или скачивания моделей.
     source = Path(__file__).resolve().parents[2] / "ai" / "src"
@@ -262,7 +271,9 @@ def execute(
 ) -> WorkerResult:
     try:
         settings = AISettings.model_validate(data["settings"])
-        if guard_network and settings.mode != "network":
+        if guard_network and settings.mode == "offline":
+            sys.addaudithook(_deny_network)
+        elif guard_network and settings.mode == "template" and not settings.live_sources:
             sys.addaudithook(_deny_network)
         return run_module(
             AIInput.model_validate(data["pair"]),

@@ -20,10 +20,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def migration() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[1] / "alembic/versions/f6a7b8c9d0e1_cyrillic_categories.py"
-    )
+def migration(filename: str = "f6a7b8c9d0e1_cyrillic_categories.py") -> ModuleType:
+    path = Path(__file__).resolve().parents[1] / "alembic/versions" / filename
     spec = importlib.util.spec_from_file_location("cyrillic_categories", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -139,3 +137,58 @@ def test_conflicting_keys_abort_without_overwriting_data(connection: Connection)
         "А": 90,
     }
     assert connection.scalar(sa.text("SELECT category::text FROM item_checks WHERE id=1")) == "A"
+
+
+@pytest.mark.parametrize("synthetic_active", [True, False])
+def test_standard_mode_preserves_real_reference_and_old_data(
+    connection: Connection, synthetic_active: bool
+) -> None:
+    connection.execute(
+        sa.text(
+            "CREATE TABLE reference_versions (id integer PRIMARY KEY, "
+            "is_synthetic boolean NOT NULL DEFAULT true, is_active boolean NOT NULL)"
+        )
+    )
+    connection.execute(
+        sa.text("INSERT INTO reference_versions VALUES (1, true, :a), (2, false, :b)"),
+        {"a": synthetic_active, "b": not synthetic_active},
+    )
+    module = migration("a7b8c9d0e1f2_standard_reference_mode.py")
+    with Operations.context(MigrationContext.configure(connection)):
+        module.upgrade()
+    assert connection.execute(
+        sa.text("SELECT id, is_synthetic, is_active FROM reference_versions ORDER BY id")
+    ).all() == [(1, True, False), (2, False, not synthetic_active)]
+    connection.execute(sa.text("INSERT INTO reference_versions (id, is_active) VALUES (3, false)"))
+    assert (
+        connection.scalar(sa.text("SELECT is_synthetic FROM reference_versions WHERE id=3"))
+        is False
+    )
+    assert connection.execute(
+        sa.text("SELECT category::text FROM item_checks ORDER BY id")
+    ).scalars().all() == ["A", "B", "V", None]
+    with Operations.context(MigrationContext.configure(connection)):
+        module.downgrade()
+    assert (
+        connection.scalar(sa.text("SELECT is_active FROM reference_versions WHERE id=1")) is False
+    )
+    connection.execute(sa.text("INSERT INTO reference_versions (id, is_active) VALUES (4, false)"))
+    assert (
+        connection.scalar(sa.text("SELECT is_synthetic FROM reference_versions WHERE id=4")) is True
+    )
+
+
+def test_age_group_migration_preserves_existing_application(connection: Connection) -> None:
+    connection.execute(sa.text("INSERT INTO applications (id, summary) VALUES (1, 'existing')"))
+    module = migration("b8c9d0e1f2a3_application_age_group.py")
+    with Operations.context(MigrationContext.configure(connection)):
+        module.upgrade()
+    assert connection.execute(sa.text("SELECT summary, age_group FROM applications")).one() == (
+        "existing",
+        None,
+    )
+    connection.execute(sa.text("UPDATE applications SET age_group='adult' WHERE id=1"))
+    assert connection.scalar(sa.text("SELECT age_group FROM applications")) == "adult"
+    with Operations.context(MigrationContext.configure(connection)):
+        module.downgrade()
+    assert connection.scalar(sa.text("SELECT summary FROM applications")) == "existing"

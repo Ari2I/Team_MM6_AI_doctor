@@ -123,7 +123,7 @@ def fake_module(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
 
 def adapter(**kwargs: Any) -> AIAdapter:
-    return AIAdapter(AISettings(mode="offline", demo_data=True, **kwargs))
+    return AIAdapter(AISettings(mode="offline", corpus_path="ai/examples/corpus.json", **kwargs))
 
 
 def test_template_never_imports_or_starts_module(
@@ -329,11 +329,13 @@ def test_network_allowlist_excludes_private_fields() -> None:
     assert "item.inn" in ai_worker.sent_field_names(filtered)
 
 
-def test_no_implicit_demo_flag(
+def test_ordinary_mode_needs_no_demo_flag(
     fake_module: SimpleNamespace, pair: AIInput, local: PairCheck
 ) -> None:
     result = AIAdapter(AISettings(mode="offline")).analyze(pair, local)
-    assert result.review_reason == "AI_UNAVAILABLE" and fake_module.calls == 0
+    assert result.category == local.category and not result.needs_review
+    assert result.source == local.source and result.comment
+    assert fake_module.calls == 0
 
 
 def test_reason_storage_needs_no_enum_migration() -> None:
@@ -414,7 +416,7 @@ def test_network_provider_requires_tls_with_mock_sdk(
             ca_bundle_file="/external/ca.pem",
         ),
     )
-    service = AIAdapter(AISettings(mode="network", demo_data=True))
+    service = AIAdapter(AISettings(mode="network", corpus_path="ai/examples/corpus.json"))
     result = service.analyze(pair, local)
     assert not result.needs_review
     assert configured["verify_ssl_certs"] is True

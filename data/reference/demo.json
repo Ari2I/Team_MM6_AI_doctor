@@ -1,5 +1,6 @@
 {
   "reference_version": "demo-api-1",
+  "is_synthetic": true,
   "drugs": [
     {"trade_name": "Нурофен", "mnn": "Демо-МНН-01"},
     {"trade_name": "Но-шпа", "mnn": "Демо-МНН-02"},

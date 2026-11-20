@@ -41,6 +41,14 @@ class ApplicationListEntry(BaseModel):
 
 
 class ApplicationDetails(ApplicationListEntry):
+    age_group: str | None = Field(default=None, description="Возрастная группа: adult или child")
+    reference_name: str | None = Field(
+        default=None, description="Название использованного справочника"
+    )
+    reference_is_synthetic: bool | None = Field(
+        default=None,
+        description="Использован синтетический справочник; null, если источник не установлен",
+    )
     summary: str | None = Field(
         default=None,
         description="Резюме анализа",

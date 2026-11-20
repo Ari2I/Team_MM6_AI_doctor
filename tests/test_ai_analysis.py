@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.api.applications import _card
-from app.config import AISettings
+from app.config import REVIEW_REASON_LABELS, AISettings
 from app.models import Application, ApplicationDiagnosis, ApplicationItem, ItemCheck
 from app.models.enums import ReviewReason
 from app.schemas.analysis import PairCheck, ReferenceSnapshot
@@ -73,7 +73,7 @@ def test_pair_failure_does_not_fail_application(monkeypatch: pytest.MonkeyPatch)
     application, snapshot = demo_application()
     session = MemorySession(application)
     monkeypatch.setattr(analysis, "_load_snapshot", lambda _: snapshot)
-    service = AIAdapter(AISettings(mode="offline", demo_data=True))
+    service = AIAdapter(AISettings(mode="offline"))
     monkeypatch.setattr(analysis, "AIAdapter", lambda: service)
     calls = []
 
@@ -90,7 +90,8 @@ def test_pair_failure_does_not_fail_application(monkeypatch: pytest.MonkeyPatch)
     assert session.checks[0].review_reason == "AI_TIMEOUT"
     assert [c.category for c in session.checks] == ["А", "Б", "В"]
     assert result.category_shares["total_amount"] == 1000
-    assert "AI_TIMEOUT" in result.warning_message
+    assert REVIEW_REASON_LABELS["AI_TIMEOUT"].rstrip(".") in result.warning_message
+    assert "AI_TIMEOUT" not in result.warning_message
     assert _card(application).application.status == "analyzed"
 
 
@@ -118,7 +119,7 @@ def test_real_offline_application(monkeypatch: pytest.MonkeyPatch) -> None:
         analysis,
         "AIAdapter",
         lambda: AIAdapter(
-            AISettings(mode="offline", demo_data=True),
+            AISettings(mode="offline", corpus_path="ai/examples/corpus.json"),
         ),
     )
     result = analysis.analyze_application(session, application.id)

@@ -76,7 +76,7 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
         summary.cell(summary.max_row, 2).number_format = '0.00"%"'
     _append(summary, ["Резюме", application.summary])
     if application.warning_message:
-        _append(summary, ["Предупреждение", application.warning_message])
+        _append(summary, ["Предупреждение", humanize_warning_text(application.warning_message)])
     versions = sorted(
         {
             check.reference_version
@@ -86,16 +86,25 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
         }
     )
     _append(summary, ["Версия справочника", "\n".join(versions) or "Не указана"])
-    # В карточке нет is_synthetic; импортёр допускает только Literal[True].
-    # Если появятся несинтетические версии, карточке потребуются их метаданные.
     _append(
         summary,
         [
             "Справочник",
-            "Демонстрационный (синтетический); не является клиническим справочником.",
+            "Демонстрационный (синтетический); не является клиническим справочником."
+            if application.reference_is_synthetic is True
+            else application.reference_name
+            or "Источник указан в проверках каждой пары; тип справочника не установлен.",
         ],
     )
     _append(summary, ["Дисклеймер", card.disclaimer])
+    if application.age_group:
+        _append(
+            summary,
+            [
+                "Возрастная группа",
+                {"adult": "Взрослые", "child": "Дети"}.get(application.age_group, "Не указана"),
+            ],
+        )
 
     drugs = workbook.create_sheet("Препараты")
     _append(

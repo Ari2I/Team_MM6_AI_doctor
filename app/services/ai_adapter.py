@@ -35,6 +35,7 @@ class AIInput(BaseModel):
     dosage: str | None = None
     quantity: Decimal | None = None
     amount: Decimal | None = None
+    age_group: str | None = None
 
     def complete(self) -> bool:
         return bool(
@@ -59,6 +60,8 @@ class WorkerResult(BaseModel):
     error: str | None = None
     tokens: int | None = Field(default=None, ge=0)
     sent_fields: list[str] = Field(default_factory=list)
+    mnn: str | None = None
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
 class AIAdapter:
@@ -67,6 +70,8 @@ class AIAdapter:
         self.deadline = monotonic() + self.settings.application_timeout_seconds
         self.last_tokens: int | None = None
         self.last_sent_fields: list[str] = []
+        self.last_mnn: str | None = None
+        self.last_diagnostics: dict[str, Any] = {}
 
     def _read_metadata(self, output: str | bytes) -> str:
         if isinstance(output, bytes):
@@ -95,9 +100,19 @@ class AIAdapter:
     def analyze(self, pair: AIInput, local: PairCheck) -> PairCheck:
         self.last_tokens = None
         self.last_sent_fields = []
-        if self.settings.mode == "template":
+        self.last_mnn = None
+        self.last_diagnostics = {}
+        if self.settings.mode == "template" and not (
+            self.settings.registry_path
+            or self.settings.clinical_cache_dir
+            or self.settings.live_sources
+        ):
             return local
-        if not pair.complete():
+        if not pair.drug_name.strip() or not pair.diagnosis.strip():
+            return self._fallback(local, ReviewReason.AI_INPUT_INCOMPLETE)
+        # The legacy corpus contract requires complete purchase fields. Ordinary
+        # pair analysis never depends on dosage, quantity or amount.
+        if self.settings.corpus_path and not self.settings.registry_path and not pair.complete():
             return self._fallback(local, ReviewReason.AI_INPUT_INCOMPLETE)
         budget = min(self.settings.pair_timeout_seconds, self.deadline - monotonic())
         if budget <= 0:
@@ -122,6 +137,8 @@ class AIAdapter:
                 check=True,
             )
             result = WorkerResult.model_validate_json(self._read_metadata(completed.stdout))
+            self.last_mnn = result.mnn
+            self.last_diagnostics = result.diagnostics
             if result.tokens is not None:
                 self.last_tokens = result.tokens
             self.last_sent_fields = result.sent_fields or self.last_sent_fields
@@ -152,7 +169,9 @@ class AIAdapter:
                 )
             ai.needs_review = True
             ai.review_reason = (
-                ReviewReason.AI_PRELIMINARY if ai.category else local.review_reason
+                ReviewReason.AI_PRELIMINARY
+                if ai.category
+                else ai.review_reason or local.review_reason
             ) or ReviewReason.AI_REVIEW_REQUIRED
             return ai
         except subprocess.TimeoutExpired as error:

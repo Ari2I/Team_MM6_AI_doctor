@@ -24,6 +24,7 @@ def card() -> dict[str, Any]:
             "id": str(uuid4()),
             "filename": "sample_ok.xlsx",
             "status": "analyzed",
+            "reference_is_synthetic": True,
             "traffic_light": "yellow",
             "requires_review": True,
             "created_at": "2026-11-06T10:00:00+05:00",
@@ -110,6 +111,13 @@ def test_report_contents(card: dict[str, Any]) -> None:
         assert all(cell.font.bold and cell.fill.patternType == "solid" for cell in sheet[1])
         assert sheet["B2"].alignment.wrap_text
         assert sheet.column_dimensions["B"].width >= 12
+
+
+def test_real_reference_is_not_mislabeled_as_synthetic(card: dict[str, Any]) -> None:
+    card["application"]["reference_is_synthetic"] = False
+    card["application"]["reference_name"] = "Рабочий справочник"
+    workbook = load_workbook(BytesIO(build_report(card)))
+    assert dict(workbook["Сводка"].values)["Справочник"] == "Рабочий справочник"
 
 
 @pytest.mark.parametrize("color", TRAFFIC_LIGHT_COLORS)

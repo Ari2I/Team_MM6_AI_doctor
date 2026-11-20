@@ -1,4 +1,4 @@
-"""Синтетический справочник и его активные версии."""
+"""Версионированный справочник препаратов, диагнозов и правил."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class ReferenceVersion(Base):
     version: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text)
-    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     drugs: Mapped[list[ReferenceDrug]] = relationship(
         back_populates="version", cascade="all, delete-orphan"
