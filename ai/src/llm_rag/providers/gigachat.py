@@ -111,8 +111,8 @@ class GigaChatProvider:
             raise
 
     def _generate(self, payload: dict) -> dict:
-        if payload.get("is_demo") is not True:
-            raise ProviderError("DEMO_DATA_REQUIRED")
+        if type(payload.get("is_demo")) is not bool:
+            raise ProviderError("INVALID_DATA_PROVENANCE")
         wire_mode = payload.get('schema_version') == 'staff-facts.2'
         staff_mode = wire_mode
         instructions = INSTRUCTIONS

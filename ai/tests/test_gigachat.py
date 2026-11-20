@@ -204,11 +204,30 @@ def test_configuration_is_checked_before_sdk_calls(sdk_wire, kwargs):
     assert sdk_wire.requests == []
 
 
-def test_non_demo_data_cannot_trigger_sdk_auth(sdk_wire):
+@pytest.mark.parametrize('flag', [None, 'true', 1])
+def test_invalid_provenance_cannot_trigger_sdk_auth(sdk_wire, flag):
     client = make_provider()
     with pytest.raises(ProviderError):
-        client.generate({"is_demo": False})
+        client.generate({"is_demo": flag})
     assert sdk_wire.requests == []
+
+
+def test_ordinary_reference_payload_is_allowed_without_demo_flag(sdk_wire):
+    raw, _, _, _, payload = generate()
+    payload['is_demo'] = False
+
+    def handler(request):
+        if request.url.path == '/api/v2/oauth':
+            return httpx.Response(200, json={
+                'access_token': 'test-access', 'expires_at': (NOW + 1800) * 1000,
+            })
+        return httpx.Response(200, json=completion(raw))
+
+    sdk_wire.handler = handler
+    with make_provider() as client:
+        assert client.generate(payload) == raw
+    context = json.loads(json.loads(sdk_wire.requests[-1].content)['messages'][1]['content'])
+    assert context['is_demo'] is False
 
 
 def test_sdk_is_configured_with_tls_and_closed_through_provider(monkeypatch, sdk_wire):

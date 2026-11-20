@@ -9,7 +9,7 @@ from pathlib import Path
 
 import httpx
 
-from llm_rag.contracts import AnalysisItem, AnalysisRequest, DosageCheck
+from llm_rag.contracts import AnalysisRequest, DosageCheck
 from llm_rag.corpus import Corpus
 
 from .classifier import (
@@ -412,7 +412,12 @@ class ML2Pipeline:
         diagnosis_code: str | None = None,
         live_sources: bool = False,
     ) -> ML2Batch:
-        request = AnalysisRequest.model_validate(request.model_dump())
+        # Backend pair contracts may relax purchase-only fields without inventing
+        # dosage, quantities or synthetic provenance. Legacy requests stay strict.
+        request_type = type(request)
+        if not isinstance(request, AnalysisRequest):
+            raise TypeError("Expected AnalysisRequest or a compatible subclass")
+        request = request_type.model_validate(request.model_dump())
         code = _code(request, diagnosis_code)
         evaluations, items, catalog_cache = [], [], {}
         for item in request.items:
@@ -442,7 +447,7 @@ class ML2Pipeline:
             evaluations.append(evaluation)
             value = evaluation.classification
             items.append(
-                AnalysisItem(
+                type(item)(
                     item_id=item.item_id,
                     original=item.original.model_copy(deep=True),
                     inn=value.inn,
@@ -458,11 +463,11 @@ class ML2Pipeline:
                     missing_data=list(value.missing_context),
                 )
             )
-        prepared = AnalysisRequest(
+        prepared = request_type(
             schema_version="1.0",
             request_id=request.request_id,
             diagnosis=request.diagnosis,
-            is_demo=True,
+            is_demo=request.is_demo,
             context=dict(request.context),
             items=items,
         )
