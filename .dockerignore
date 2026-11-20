@@ -15,3 +15,5 @@ dist
 !tests/data/*.xlsx
 !data/demo/*.xlsx
 /certs
+/.local
+**/~$*

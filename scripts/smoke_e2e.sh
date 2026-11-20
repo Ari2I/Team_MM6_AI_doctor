@@ -4,7 +4,7 @@ set -euo pipefail
 # Explicit empty values override credentials from .env in the open smoke mode.
 export WEB_USER="${WEB_USER:-}" WEB_PASSWORD="${WEB_PASSWORD:-}"
 # Smoke is always offline and never inherits an operator's network mode.
-export AI_MODE=template API_BUILD_TARGET=template AI_DEMO_DATA=false
+export AI_MODE=template API_BUILD_TARGET=template AI_CORPUS_PATH=
 export GIGACHAT_CREDENTIALS= GIGACHAT_SCOPE= GIGACHAT_CA_BUNDLE_FILE=
 : "${WEB_PORT:?Export an unused WEB_PORT}"
 : "${POSTGRES_DB:?Export POSTGRES_DB}"
