@@ -1,6 +1,5 @@
-"""Smoke через nginx; запускается внутри api без дополнительных зависимостей."""
+"""Smoke через локальный API; запускается внутри api без дополнительных зависимостей."""
 
-import base64
 import json
 import os
 from io import BytesIO
@@ -13,18 +12,15 @@ from openpyxl import load_workbook
 
 from app.config import get_access_settings
 
-BASE = "http://web:80"
+BASE = "http://127.0.0.1:8000"
 DATA = Path("tests/data")
 REFERENCE_VERSION = os.environ.get("SMOKE_REFERENCE_VERSION", "demo-api-1")
-USER = os.environ.get("WEB_USER", "")
-PASSWORD = os.environ.get("WEB_PASSWORD", "")
-TOKEN = base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode() if USER and PASSWORD else None
 
 
 def request(
-    path: str, data: bytes | None = None, content_type: str | None = None, *, auth: bool = True
+    path: str, data: bytes | None = None, content_type: str | None = None
 ) -> tuple[int, bytes, str]:
-    headers = {"Authorization": f"Basic {TOKEN}"} if auth and TOKEN else {}
+    headers: dict[str, str] = {}
     if content_type:
         headers["Content-Type"] = content_type
     req = Request(BASE + path, data=data, headers=headers)
@@ -69,33 +65,14 @@ def variant(*, typo: bool = False) -> bytes:
 
 
 def access() -> None:
-    assert request("/health", auth=False)[0] == 200
+    assert request("/health")[0] == 200
     settings = get_access_settings()
-    paths = {
-        "/": 200,
-        "/index.html": 200,
-        "/applications": 200 if settings.enable_application_list else 404,
-        "/applications/": 200 if settings.enable_application_list else 404,
-        "/docs": 200 if settings.enable_api_docs else 404,
-        "/applications/00000000-0000-0000-0000-000000000000/report.xlsx": 404,
-    }
-    for path, open_status in paths.items():
-        assert request(path, auth=False)[0] == (401 if TOKEN else open_status), path
-    assert request("/applications", b"", auth=False)[0] == (401 if TOKEN else 422)
-    assert request("/")[0] == 200
-    status, html, _ = request("/")
-    assert status == 200
-    import re
-
-    assets = re.findall(rb'(?:src|href)="(/assets/[^\"]+)"', html)
-    assert assets
-    for asset in assets:
-        assert request(asset.decode(), auth=False)[0] == (401 if TOKEN else 200)
-        assert request(asset.decode())[0] == 200
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert request(path)[0] == (200 if settings.enable_api_docs else 404), path
     for path in ("/applications", "/applications/"):
         assert request(path)[0] == (200 if settings.enable_application_list else 404), path
+    assert request("/applications", b"")[0] == 422
+    assert request("/applications/00000000-0000-0000-0000-000000000000/report.xlsx")[0] == 404
 
 
 def analyzed(content: bytes) -> dict:
@@ -166,7 +143,7 @@ def demo_files() -> None:
 
 
 legacy_scenarios = [
-    ("access and static assets", access),
+    ("API access switches", access),
     ("correct + card + report", correct),
     ("typo + review + report", typo),
     ("two diagnoses + pair checks + report", two_diagnoses),

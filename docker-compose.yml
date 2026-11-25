@@ -19,6 +19,8 @@ services:
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-}
       GIGACHAT_CA_BUNDLE_FILE: ${GIGACHAT_CA_BUNDLE_FILE:-}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -32,22 +34,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
-
-  web:
-    build: ./frontend
-    environment:
-      WEB_USER: ${WEB_USER:-}
-      WEB_PASSWORD: ${WEB_PASSWORD:-}
-    ports:
-      - "${WEB_PORT:?Укажите WEB_PORT в окружении}:80"
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   db:
     image: postgres:16-alpine
