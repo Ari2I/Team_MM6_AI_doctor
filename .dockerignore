@@ -12,3 +12,8 @@ build
 dist
 *.xlsx
 *.xls
+!tests/data/*.xlsx
+!data/demo/*.xlsx
+/certs
+/.local
+**/~$*

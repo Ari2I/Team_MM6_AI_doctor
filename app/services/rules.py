@@ -48,10 +48,20 @@ def pairs_for_item(item_diagnosis: str | None, application_diagnoses: Iterable[s
 
 def _review(reason: ReviewReason, snapshot: ReferenceSnapshot) -> PairCheck:
     return PairCheck(
+        source=(
+            "Справочник не подключён"
+            if snapshot.reference_version == "unconfigured"
+            else f"Поиск по справочнику {snapshot.reference_version}: "
+            "подтверждённое правило не найдено"
+        ),
         reference_version=snapshot.reference_version,
         needs_review=True,
         review_reason=reason,
-        comment=_COMMENTS[reason],
+        comment=(
+            "Справочник не подключён: МНН и категория не определены. Требуется проверка человеком."
+            if snapshot.reference_version == "unconfigured"
+            else _COMMENTS[reason]
+        ),
     )
 
 
@@ -98,6 +108,10 @@ def check_pair(
         source=rule.source,
         reference_version=snapshot.reference_version,
         needs_review=False,
+        comment=(
+            f"По правилу справочника указана категория {rule.category.value}. "
+            f"Источник: {rule.source or 'не указан'}; версия: {snapshot.reference_version}."
+        ),
     )
 
 
@@ -109,6 +123,13 @@ def detect_conflicts(checks_for_item: list[PairCheck]) -> list[PairCheck]:
         return checks_for_item
     for check in checks_for_item:
         check.needs_review = True
-        check.review_reason = ReviewReason.CONFLICTING_CATEGORIES
-        check.comment = _COMMENTS[ReviewReason.CONFLICTING_CATEGORIES]
+        if check.review_reason and check.review_reason.value.startswith("AI_"):
+            check.comment = " ".join(
+                part
+                for part in (check.comment, _COMMENTS[ReviewReason.CONFLICTING_CATEGORIES])
+                if part
+            )
+        else:
+            check.review_reason = ReviewReason.CONFLICTING_CATEGORIES
+            check.comment = _COMMENTS[ReviewReason.CONFLICTING_CATEGORIES]
     return checks_for_item

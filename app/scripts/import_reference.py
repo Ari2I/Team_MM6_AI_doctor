@@ -1,11 +1,11 @@
-"""Импорт синтетического справочника в PostgreSQL."""
+"""Импорт версионированного справочника препаратов и правил в PostgreSQL."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select, text, update
@@ -41,19 +41,24 @@ class ReferenceDocument(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     reference_version: Annotated[str, Field(min_length=1)]
-    name: Annotated[str, Field(min_length=1)] = (
-        "Демонстрационные данные; не клинические рекомендации"
-    )
+    name: Annotated[str, Field(min_length=1)] = "Справочник препаратов и правил"
     description: Annotated[str, Field(min_length=1)] = (
-        "Демонстрационные синтетические данные; не клинические рекомендации."
+        "Версионированные соответствия препаратов и диагнозов."
     )
-    is_synthetic: Literal[True] = True
+    is_synthetic: bool = Field(default=False, strict=True)
     drugs: list[InputDrug] = Field(default_factory=list)
     diagnoses: list[InputDiagnosis] = Field(default_factory=list)
     rules: list[InputRule] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_references(self) -> ReferenceDocument:
+        if not self.is_synthetic and any(
+            rule.category is not None and not (rule.source and rule.source.strip())
+            for rule in self.rules
+        ):
+            raise ValueError(
+                "Для каждого правила рабочего справочника необходимо указать источник."
+            )
         diagnosis_ids = {normalize_text(item.diagnosis_id) for item in self.diagnoses}
         mnn_values = {normalize_text(item.mnn) for item in self.drugs}
         if len(diagnosis_ids) != len(self.diagnoses):
@@ -120,9 +125,15 @@ def _write_reference(
         name=(
             f"Демонстрационные данные: {document.name} ({document.reference_version}); "
             "не клинические рекомендации"
+        )
+        if document.is_synthetic
+        else document.name,
+        description=(
+            f"Демонстрационные данные. {document.description} Не клинические рекомендации."
+            if document.is_synthetic
+            else document.description
         ),
-        description=f"Демонстрационные данные. {document.description} Не клинические рекомендации.",
-        is_synthetic=True,
+        is_synthetic=document.is_synthetic,
         is_active=activate,
     )
     version.drugs = [
@@ -178,7 +189,7 @@ def import_reference(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Импорт синтетического справочника.")
+    parser = argparse.ArgumentParser(description="Импорт справочника препаратов и правил.")
     parser.add_argument("path", type=Path, help="Путь к JSON-файлу справочника")
     parser.add_argument(
         "--activate", action="store_true", help="Сделать импортированную версию активной"

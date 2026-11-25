@@ -8,6 +8,7 @@ from typing import Any, NamedTuple
 
 from app.config import get_traffic_light_settings
 from app.models.enums import DrugCategory, TrafficLight
+from app.services.presentation import position_word, review_reason_label
 
 _ORDER = (DrugCategory.A, DrugCategory.B, DrugCategory.V)
 
@@ -17,7 +18,7 @@ def _value(obj: Any, name: str, default: Any = None) -> Any:
 
 
 def best_category(checks: Iterable[Any]) -> DrugCategory | None:
-    """Вернуть лучшую категорию строки по приоритету A > B > V."""
+    """Вернуть лучшую категорию строки по приоритету А > Б > В."""
     categories = {_value(check, "category") for check in checks}
     for category in _ORDER:
         if category in categories or category.value in categories:
@@ -67,7 +68,7 @@ class TrafficLightDecision(NamedTuple):
 
 def compute_traffic_light(shares: Mapping[str, float], has_review: bool) -> TrafficLightDecision:
     settings = get_traffic_light_settings()
-    a_share = float(shares.get("A", 0))
+    a_share = float(shares.get("А", 0))
     unknown_share = float(shares.get("undetermined", 0))
     if "total_amount" in shares and float(shares.get("total_amount", 0)) <= 0:
         return TrafficLightDecision(
@@ -85,13 +86,13 @@ def compute_traffic_light(shares: Mapping[str, float], has_review: bool) -> Traf
         if has_review:
             return TrafficLightDecision(
                 TrafficLight.YELLOW,
-                "Доля категории A выше порога, но есть позиции "
+                "Доля категории А выше порога, но есть позиции "
                 "на проверку человеком "
                 f"({a_share:.2f}%).",
             )
         return TrafficLightDecision(
             TrafficLight.GREEN,
-            "Доля категории A "
+            "Доля категории А "
             f"{a_share:.2f}% выше порога "
             f"{settings.green_category_a_threshold:.2f}%.",
         )
@@ -101,7 +102,7 @@ def compute_traffic_light(shares: Mapping[str, float], has_review: bool) -> Traf
             TrafficLight.YELLOW, "Есть позиции, требующие проверки человеком."
         )
     return TrafficLightDecision(
-        TrafficLight.RED, "Доля категории A не превышает установленный порог."
+        TrafficLight.RED, "Доля категории А не превышает установленный порог."
     )
 
 
@@ -110,8 +111,8 @@ def build_summary(
 ) -> str:
     color = traffic_light.value if isinstance(traffic_light, TrafficLight) else str(traffic_light)
     return (
-        f"Результат анализа: индикатор {color}; категория A — {float(shares.get('A', 0)):.2f}%, "
-        f"B — {float(shares.get('B', 0)):.2f}%, V — {float(shares.get('V', 0)):.2f}%, "
+        f"Результат анализа: индикатор {color}; категория А — {float(shares.get('А', 0)):.2f}%, "
+        f"Б — {float(shares.get('Б', 0)):.2f}%, В — {float(shares.get('В', 0)):.2f}%, "
         f"не определена — {float(shares.get('undetermined', 0)):.2f}%. "
         + ("Требуется проверка человеком. " if has_review else "")
         + "Результат носит рекомендательный характер; решение принимает человек."
@@ -131,5 +132,6 @@ def build_warning_message(checks: Iterable[Any]) -> str | None:
             if _value(check, "review_reason")
         }
     )
-    suffix = ", ".join(reasons) if reasons else "требуется уточнение"
-    return f"Для {count} позиций требуется проверка человеком: {suffix}."
+    suffix = "; ".join(dict.fromkeys(review_reason_label(reason).rstrip(".") for reason in reasons))
+    suffix = suffix or "причина требует уточнения специалистом"
+    return f"Для {count} {position_word(count)} требуется проверка человеком: {suffix}."

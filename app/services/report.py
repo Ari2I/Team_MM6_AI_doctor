@@ -10,6 +10,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.config import CATEGORY_LABELS, REVIEW_REASON_LABELS, TRAFFIC_LIGHT_COLORS
 from app.schemas.application_api import ApplicationCard
+from app.services.presentation import humanize_warning_text
 
 _HEADER_FILL = PatternFill("solid", fgColor="D9E2F3")
 _REVIEW_FILL = PatternFill("solid", fgColor="FFF2CC")
@@ -70,12 +71,12 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
     summary["B4"].fill = PatternFill("solid", fgColor=TRAFFIC_LIGHT_COLORS[color])
     _append(summary, ["Диагнозы заявки", "\n".join(card.diagnoses)])
     shares = application.category_shares or {}
-    for category in ("A", "B", "V", "undetermined"):
+    for category in ("А", "Б", "В", "undetermined"):
         _append(summary, [f"Доля суммы: {CATEGORY_LABELS[category]}", shares.get(category)])
         summary.cell(summary.max_row, 2).number_format = '0.00"%"'
     _append(summary, ["Резюме", application.summary])
     if application.warning_message:
-        _append(summary, ["Предупреждение", application.warning_message])
+        _append(summary, ["Предупреждение", humanize_warning_text(application.warning_message)])
     versions = sorted(
         {
             check.reference_version
@@ -85,16 +86,25 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
         }
     )
     _append(summary, ["Версия справочника", "\n".join(versions) or "Не указана"])
-    # В карточке нет is_synthetic; импортёр допускает только Literal[True].
-    # Если появятся несинтетические версии, карточке потребуются их метаданные.
     _append(
         summary,
         [
             "Справочник",
-            "Демонстрационный (синтетический); не является клиническим справочником.",
+            "Демонстрационный (синтетический); не является клиническим справочником."
+            if application.reference_is_synthetic is True
+            else application.reference_name
+            or "Источник указан в проверках каждой пары; тип справочника не установлен.",
         ],
     )
     _append(summary, ["Дисклеймер", card.disclaimer])
+    if application.age_group:
+        _append(
+            summary,
+            [
+                "Возрастная группа",
+                {"adult": "Взрослые", "child": "Дети"}.get(application.age_group, "Не указана"),
+            ],
+        )
 
     drugs = workbook.create_sheet("Препараты")
     _append(
@@ -136,7 +146,7 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
                     reason,
                     check.source if check else None,
                     check.reference_version if check else None,
-                    check.comment if check else None,
+                    humanize_warning_text(check.comment) if check else None,
                 ],
             )
             if needs_review:
@@ -151,7 +161,7 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
             warnings,
             [
                 _LEVEL_LABELS.get(issue.level, issue.level),
-                issue.message,
+                humanize_warning_text(issue.message),
                 issue.row,
                 issue.column,
             ],

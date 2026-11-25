@@ -56,7 +56,7 @@ def test_application_roundtrip_and_database_cascade() -> None:
                     items=[first_item, second_item, third_item],
                     requires_review=True,
                     warning_message="Учебное предупреждение",
-                    category_shares={"A": 0.4, "B": 0.2, "V": 0.1, "undetermined": 0.3},
+                    category_shares={"А": 0.4, "Б": 0.2, "В": 0.1, "undetermined": 0.3},
                     validation_issues=[
                         ValidationIssue(
                             level=IssueLevel.WARNING,
@@ -86,9 +86,9 @@ def test_application_roundtrip_and_database_cascade() -> None:
                 assert loaded.status is ApplicationStatus.UPLOADED
                 assert loaded.requires_review is True
                 assert loaded.category_shares == {
-                    "A": 0.4,
-                    "B": 0.2,
-                    "V": 0.1,
+                    "А": 0.4,
+                    "Б": 0.2,
+                    "В": 0.1,
                     "undetermined": 0.3,
                 }
                 assert len(loaded.diagnoses) == 2

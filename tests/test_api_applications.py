@@ -69,6 +69,18 @@ def test_upload_and_get_card(client: TestClient) -> None:
     assert loaded.json() == body
 
 
+def test_explicit_age_group_is_stored_with_application(client: TestClient) -> None:
+    response = client.post(
+        "/applications",
+        files={"file": ("sample_ok.xlsx", (DATA_DIR / "sample_ok.xlsx").read_bytes())},
+        data={"age_group": "child"},
+    )
+    assert response.status_code == 201
+    assert response.json()["application"]["age_group"] == "child"
+    identifier = response.json()["application"]["id"]
+    assert client.get(f"/applications/{identifier}").json()["application"]["age_group"] == "child"
+
+
 def test_upload_with_diagnosis_form_and_list(client: TestClient) -> None:
     with (DATA_DIR / "sample_ok.xlsx").open("rb") as source:
         response = client.post(

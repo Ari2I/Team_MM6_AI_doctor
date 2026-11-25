@@ -6,15 +6,15 @@
     "traffic_light": "red",
     "requires_review": false,
     "created_at": "2026-11-05T15:01:28.979925Z",
-    "summary": "Результат анализа: индикатор red; категория A — 76.78%, B — 15.66%, V — 7.56%, не определена — 0.00%. Результат носит рекомендательный характер; решение принимает человек.",
+    "summary": "Результат анализа: индикатор red; категория А — 76.78%, Б — 15.66%, В — 7.56%, не определена — 0.00%. Результат носит рекомендательный характер; решение принимает человек.",
     "warning_message": null,
     "category_shares": {
-      "A": 76.78044171489312,
-      "B": 15.660800755875753,
-      "V": 7.558757529231133,
-      "A_amount": 6501.0,
-      "B_amount": 1326.0,
-      "V_amount": 640.0,
+      "А": 76.78044171489312,
+      "Б": 15.660800755875753,
+      "В": 7.558757529231133,
+      "А_amount": 6501.0,
+      "Б_amount": 1326.0,
+      "В_amount": 640.0,
       "total_amount": 8467.0,
       "undetermined": 0.0,
       "undetermined_amount": 0.0
@@ -36,7 +36,7 @@
       "checks": [
         {
           "diagnosis": "Учебный диагноз 01",
-          "category": "A",
+          "category": "А",
           "category_label": "Жизненно необходимые",
           "source": "Синтетический демо-справочник",
           "reference_version": "demo-api-1",
@@ -55,7 +55,7 @@
       "checks": [
         {
           "diagnosis": "Учебный диагноз 01",
-          "category": "B",
+          "category": "Б",
           "category_label": "Сопутствующая терапия",
           "source": "Синтетический демо-справочник",
           "reference_version": "demo-api-1",
@@ -74,7 +74,7 @@
       "checks": [
         {
           "diagnosis": "Учебный диагноз 02",
-          "category": "A",
+          "category": "А",
           "category_label": "Жизненно необходимые",
           "source": "Синтетический демо-справочник",
           "reference_version": "demo-api-1",
@@ -93,7 +93,7 @@
       "checks": [
         {
           "diagnosis": "Учебный диагноз 02",
-          "category": "V",
+          "category": "В",
           "category_label": "Сомнительные/опциональные",
           "source": "Синтетический демо-справочник",
           "reference_version": "demo-api-1",
@@ -112,7 +112,7 @@
       "checks": [
         {
           "diagnosis": "Учебный диагноз 03",
-          "category": "A",
+          "category": "А",
           "category_label": "Жизненно необходимые",
           "source": "Синтетический демо-справочник",
           "reference_version": "demo-api-1",
@@ -131,7 +131,7 @@
       "checks": [
         {
           "diagnosis": "Учебный диагноз 03",
-          "category": "B",
+          "category": "Б",
           "category_label": "Сопутствующая терапия",
           "source": "Синтетический демо-справочник",
           "reference_version": "demo-api-1",

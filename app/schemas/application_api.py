@@ -41,6 +41,14 @@ class ApplicationListEntry(BaseModel):
 
 
 class ApplicationDetails(ApplicationListEntry):
+    age_group: str | None = Field(default=None, description="Возрастная группа: adult или child")
+    reference_name: str | None = Field(
+        default=None, description="Название использованного справочника"
+    )
+    reference_is_synthetic: bool | None = Field(
+        default=None,
+        description="Использован синтетический справочник; null, если источник не установлен",
+    )
     summary: str | None = Field(
         default=None,
         description="Резюме анализа",
@@ -54,13 +62,13 @@ class ApplicationDetails(ApplicationListEntry):
     category_shares: dict[str, float] | None = Field(
         default=None,
         description="Доли в процентах и суммы по категориям",
-        examples=[{"A": 100.0, "B": 0.0, "V": 0.0, "undetermined": 0.0}],
+        examples=[{"А": 100.0, "Б": 0.0, "В": 0.0, "undetermined": 0.0}],
     )
 
 
 class CheckDetails(BaseModel):
     diagnosis: str = Field(description="Диагноз проверенной пары", examples=["Учебный диагноз 01"])
-    category: DrugCategory | None = Field(default=None, description="Код категории", examples=["A"])
+    category: DrugCategory | None = Field(default=None, description="Код категории", examples=["А"])
     category_label: str | None = Field(
         default=None, description="Название категории", examples=["Жизненно необходимые"]
     )

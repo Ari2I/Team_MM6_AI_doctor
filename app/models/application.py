@@ -17,6 +17,7 @@ from app.schemas.validation import IssueLevel
 
 class Application(Base):
     __tablename__ = "applications"
+    age_group: Mapped[str | None] = mapped_column(Text)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     filename: Mapped[str] = mapped_column(Text)
@@ -116,7 +117,7 @@ class ItemCheck(Base):
             name="drug_category",
             values_callable=lambda cls: [value.value for value in cls],
         ),
-        comment="A / B / V — категории А / Б / В; NULL означает, что категория не определена.",
+        comment="Категории А / Б / В; NULL означает, что категория не определена.",
     )
     source: Mapped[str | None] = mapped_column(Text)
     reference_version: Mapped[str | None] = mapped_column(Text)

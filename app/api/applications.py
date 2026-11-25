@@ -12,14 +12,16 @@ from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
+from starlette.exceptions import HTTPException
 
-from app.config import CATEGORY_LABELS, DISCLAIMER, get_validation_settings
+from app.config import CATEGORY_LABELS, DISCLAIMER, get_access_settings, get_validation_settings
 from app.models import (
     Application,
     ApplicationDiagnosis,
     ApplicationItem,
     ApplicationStatus,
     ItemCheck,
+    ReferenceVersion,
     ValidationIssue,
 )
 from app.schemas.application_api import (
@@ -33,11 +35,17 @@ from app.schemas.application_api import (
 )
 from app.services.analysis import analyze_application
 from app.services.excel_parser import ExcelParseError, parse_excel
+from app.services.presentation import humanize_warning_text
 from app.services.report import build_report
 from app.services.validator import validate_file, validate_parse_result
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 logger = logging.getLogger(__name__)
+
+
+def require_application_list() -> None:
+    if not get_access_settings().enable_application_list:
+        raise HTTPException(status_code=404, detail="Страница не найдена.")
 
 
 def get_session() -> Iterator[Session]:
@@ -89,7 +97,7 @@ def _load_application(session: Session, application_id: UUID) -> Application | N
     )
 
 
-def _card(application: Application) -> ApplicationCard:
+def _card(application: Application, session: Session | None = None) -> ApplicationCard:
     items = []
     for item in sorted(application.items, key=lambda value: value.row_number):
         checks = [
@@ -101,7 +109,7 @@ def _card(application: Application) -> ApplicationCard:
                 else None,
                 source=check.source,
                 reference_version=check.reference_version,
-                comment=check.comment,
+                comment=humanize_warning_text(check.comment),
                 needs_review=check.needs_review,
                 review_reason=check.review_reason,
             )
@@ -117,8 +125,27 @@ def _card(application: Application) -> ApplicationCard:
                 checks=checks,
             )
         )
+    details = ApplicationDetails.model_validate(application)
+    details.warning_message = humanize_warning_text(details.warning_message)
+    versions = {
+        check.reference_version
+        for item in items
+        for check in item.checks
+        if check.reference_version
+    }
+    if session is not None and len(versions) == 1:
+        if next(iter(versions)).startswith("grls:"):
+            details.reference_name = "ГРЛС и клинические рекомендации"
+            details.reference_is_synthetic = False
+        else:
+            reference = session.scalar(
+                select(ReferenceVersion).where(ReferenceVersion.version.in_(versions))
+            )
+            if reference is not None:
+                details.reference_name = reference.name
+                details.reference_is_synthetic = reference.is_synthetic
     return ApplicationCard(
-        application=ApplicationDetails.model_validate(application),
+        application=details,
         disclaimer=DISCLAIMER,
         diagnoses=[diagnosis.name for diagnosis in application.diagnoses],
         items=items,
@@ -144,8 +171,14 @@ def create_application(
             examples=[["Учебный диагноз 01"]],
         ),
     ] = None,
+    age_group: Annotated[
+        str | None, Form(description="Возрастная группа: adult или child; необязательно")
+    ] = None,
 ) -> ApplicationCard | JSONResponse:
     started = monotonic()
+    if age_group not in {None, "", "adult", "child"}:
+        file.file.close()
+        return _error("invalid_age_group", "Выберите возрастную группу: взрослые или дети.")
     settings = get_validation_settings()
     file_report = validate_file(file.filename or "", file.size or 0)
     if not file_report.is_valid:
@@ -169,7 +202,9 @@ def create_application(
         return _issues_response(report.issues)
 
     application = Application(
-        filename=file.filename or "application.xlsx", status=ApplicationStatus.PARSED
+        filename=file.filename or "application.xlsx",
+        status=ApplicationStatus.PARSED,
+        age_group=age_group or None,
     )
     application.diagnoses = [
         ApplicationDiagnosis(name=name)
@@ -213,13 +248,14 @@ def create_application(
     session.expire_all()
     loaded = _load_application(session, application.id)
     assert loaded is not None
-    return _card(loaded)
+    return _card(loaded, session)
 
 
 @router.get(
     "",
     response_model=list[ApplicationListEntry],
     summary="Получить список заявок",
+    dependencies=[Depends(require_application_list)],
     description="Заявки по убыванию времени создания с пагинацией limit/offset.",
     responses={422: {"model": APIErrors, "description": "Недопустимые параметры страницы"}},
 )
@@ -266,7 +302,7 @@ def get_application(
                 ]
             },
         )
-    return _card(application)
+    return _card(application, session)
 
 
 @router.get(
@@ -299,7 +335,7 @@ def get_application_report(
         )
     else:
         return Response(
-            content=build_report(_card(application)),
+            content=build_report(_card(application, session)),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
                 "Content-Disposition": f'attachment; filename="application-{application_id}.xlsx"'

@@ -15,6 +15,7 @@ from app.models import (
     ReferenceVersion,
 )
 from app.schemas.analysis import ReferenceDiagnosis, ReferenceDrug, ReferenceRule, ReferenceSnapshot
+from app.services.ai_adapter import AIAdapter, AIInput
 from app.services.matching import match_diagnosis, match_drug
 from app.services.rules import check_pair, detect_conflicts, pairs_for_item
 from app.services.summary import (
@@ -37,7 +38,7 @@ def _load_snapshot(session: Session) -> ReferenceSnapshot:
         .order_by(ReferenceVersion.version.desc())
     )
     if version is None:
-        raise AnalysisError("Активная версия справочника не найдена.")
+        return ReferenceSnapshot(reference_version="unconfigured")
     return ReferenceSnapshot(
         reference_version=version.version,
         drugs=[ReferenceDrug(trade_name=row.trade_name, mnn=row.mnn) for row in version.drugs],
@@ -68,6 +69,7 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
     if application is None:
         raise AnalysisError("Заявка не найдена.")
     try:
+        ai_adapter = AIAdapter()
         snapshot = _load_snapshot(session)
         diagnoses = list(application.diagnoses)
         diagnosis_names = [diagnosis.name for diagnosis in diagnoses]
@@ -93,6 +95,22 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
                     continue
                 diagnosis_match = match_diagnosis(diagnosis_name, snapshot)
                 pair_check = check_pair(drug_match, diagnosis_match, snapshot)
+                pair_check = ai_adapter.analyze(
+                    AIInput(
+                        drug_name=item.drug_name or "",
+                        mnn=drug_match.mnn,
+                        diagnosis=diagnosis_name,
+                        dosage=item.dosage,
+                        quantity=item.quantity,
+                        amount=item.amount,
+                        age_group=application.age_group,
+                    ),
+                    pair_check,
+                )
+                if ai_adapter.last_mnn and not drug_match.mnn:
+                    item.mnn = ai_adapter.last_mnn
+                    item.match_note = "matched_grls"
+                    item.match_confidence = 1.0
                 db_check = ItemCheck(
                     item_id=item.id,
                     diagnosis_id=diagnosis_row.id,
@@ -125,6 +143,11 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
         application.category_shares = shares
         application.requires_review = has_review
         application.warning_message = build_warning_message(all_checks)
+        if snapshot.reference_version == "unconfigured" and not ai_adapter.settings.registry_path:
+            application.warning_message = (
+                "Рабочий справочник не подключён. МНН и категории не определены; "
+                "требуется проверка человеком."
+            )
         application.summary = build_summary(shares, decision.color, has_review)
         application.status = ApplicationStatus.ANALYZED
         session.commit()
