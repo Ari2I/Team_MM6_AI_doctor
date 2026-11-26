@@ -15,7 +15,7 @@
 Реальный полный сценарий из корня проекта:
 
 ```powershell
-.\.venv\Scripts\python.exe run_excel_scenario.py --input-dir excel_cases/review_20261112/input
+.\.venv\Scripts\python.exe check_local.py excel_cases/review_20261112/input/01_Обычная_карточка.xlsx
 ```
 
 Команда расходует токены GigaChat на семи допустимых карточках. Три намеренно

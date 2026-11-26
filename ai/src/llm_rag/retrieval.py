@@ -40,9 +40,8 @@ class Retriever:
         refs = set(item.source_refs)
         semantic = {}
         if self._vectors is not None:
-            text = (f"МНН: {item.inn}. Диагноз: {diagnosis}. "
-                    f"{item.classification_reason or ''} Дозировка: {item.original.dosage}. "
-                    f"{item.dosage_check.reason or ''}")
+            canonical=candidates[0]
+            text=f'МНН: {canonical.inn}. Диагноз: {canonical.diagnosis}.'
             semantic = self._vectors.similarities(self._embedder.embed_query(text))
 
         def rank(fragment):

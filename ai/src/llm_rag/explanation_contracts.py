@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from llm_rag.contracts import AnalysisRequest, Category, DemoFlag, DosageCheck, Model, Money, Text
+from llm_rag.contracts import AnalysisRequest, Category, DosageCheck, Model, PurchaseMoney, Text
 
 
 class PairKey(Model):
@@ -35,7 +35,6 @@ EvidenceStatus = Literal['VERIFIED', 'INSUFFICIENT_DATA', 'UNCONFIRMED',
 
 class ExplanationInput(PairKey):
     schema_version: Literal['explanation.1'] = 'explanation.1'
-    is_demo: DemoFlag = True
     diagnosis: Text
     inn: Text | None
     category: Category | None
@@ -83,7 +82,7 @@ class PairExplanation(PairKey):
 class PurchaseAmount(Model):
     request_id: Text
     item_id: Text
-    amount: Money | None
+    amount: PurchaseMoney | None
     currency: str = Field(pattern=r'^[A-Z]{3}$')
 
 

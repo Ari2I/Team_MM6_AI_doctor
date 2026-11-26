@@ -80,8 +80,7 @@ def test_dosage_only_rule_does_not_require_weight_for_category():
                     required_context={}, text='Разрешённый текст.', assertions=[category])
     dosage = dict(fragment, fragment_id='dose', required_context={'weight': '70'}, assertions=[
         dict(category, claim_id='dose', kind='DOSAGE', category=None, dosage_status='VALID', dosage='1')])
-    corpus = Corpus.model_validate(dict(corpus_version='c1', is_demo=True,
-        sources=[dict(source_id='s', title='Источник', source_type='PROTOCOL', version='2026', is_demo=True)],
+    corpus = Corpus.model_validate(dict(corpus_version='c1', sources=[dict(source_id='s', title='Источник', source_type='PROTOCOL', version='2026', )],
         fragments=[fragment, dosage]))
     result = verify_ml2_evidence(inp, snap, approved_corpus=corpus)
     assert result.status == 'VERIFIED'
@@ -101,8 +100,7 @@ def test_incompatible_alternative_rule_does_not_require_its_missing_context():
         required_context={'age_group': 'adult'}, text='Разрешённый текст.', assertions=[assertion])
     child = dict(adult, fragment_id='child', required_context={'age_group': 'child', 'weight': '20'},
         assertions=[dict(assertion, claim_id='child')])
-    corpus = Corpus.model_validate(dict(corpus_version='c1', is_demo=True,
-        sources=[dict(source_id='s', title='Источник', source_type='PROTOCOL', version='2026', is_demo=True)],
+    corpus = Corpus.model_validate(dict(corpus_version='c1', sources=[dict(source_id='s', title='Источник', source_type='PROTOCOL', version='2026', )],
         fragments=[adult, child]))
 
     evidence = verify_ml2_evidence(inp, snap, approved_corpus=corpus)

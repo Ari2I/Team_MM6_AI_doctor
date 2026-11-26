@@ -48,12 +48,14 @@ class ML2GigaChatProvider(GigaChatProvider):
 
     def complete_json(self, context: dict, instructions: str, schema: dict) -> dict:
         self.last_total_tokens = None
+        from llm_rag.network_policy import prepare_classification
+        context=prepare_classification(context,self.network_policy)
         try:
             request = Chat(
                 model=self._model,
                 stream=False,
                 function_call="none",
-                max_tokens=2048,
+                max_tokens=min(2048,self._max_output_tokens or 2048),
                 messages=[
                     {"role": "system", "content": instructions},
                     {
@@ -72,7 +74,12 @@ class ML2GigaChatProvider(GigaChatProvider):
                     }
                 },
             )
+            self.api_calls += 1
             response = self._client.chat(request)
+            if response.usage is not None:
+                for key in self.usage_totals:
+                    value=getattr(response.usage,key,None)
+                    if type(value) is int and value>=0: self.usage_totals[key]+=value
             total_tokens = getattr(
                 getattr(response, "usage", None), "total_tokens", None
             )

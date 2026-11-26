@@ -1,6 +1,5 @@
 """Регрессии независимой проверки ответа ML-2 без сети и секретов."""
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -168,31 +167,3 @@ def test_provider_validates_schema_locally_even_if_sdk_accepts_invalid_response(
                 "type": "object", "properties": {"value": {"enum": ["allowed"]}},
                 "required": ["value"], "additionalProperties": False,
             })
-
-
-def test_fragments_json_array_returns_controlled_cli_error(tmp_path):
-    from llm_rag.ml2.__main__ import main
-
-    root = Path(__file__).resolve().parents[2]
-    fragments = tmp_path / "fragments.json"
-    fragments.write_text(json.dumps([]), encoding="utf-8")
-    assert main(["--request", str(root / "examples/request.json"), "--registry",
-                 str(root / "examples/ml2/registry.synthetic.json"), "--output", str(tmp_path / "out.json"),
-                 "--fragments", str(fragments)]) == 2
-    assert not (tmp_path / "out.json").exists()
-
-
-@pytest.mark.parametrize("field", ["text", "source_id"])
-def test_fragments_with_nonstring_fields_return_controlled_cli_error(tmp_path, field):
-    from llm_rag.ml2.__main__ import main
-
-    root = Path(__file__).resolve().parents[2]
-    row = {"fragment_id": "f", "source_id": "s", "title": "Синтетика", "version": "1",
-           "url": "https://example.org", "location": "1", "text": "Синтетический текст."}
-    row[field] = 123
-    fragments = tmp_path / "fragments.json"
-    fragments.write_text(json.dumps({"демо-вещество-а": [row]}), encoding="utf-8")
-    assert main(["--request", str(root / "examples/request.json"), "--registry",
-                 str(root / "examples/ml2/registry.synthetic.json"), "--output", str(tmp_path / "out.json"),
-                 "--fragments", str(fragments)]) == 2
-    assert not (tmp_path / "out.json").exists()

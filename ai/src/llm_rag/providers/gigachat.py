@@ -63,6 +63,7 @@ class GigaChatProvider:
         enabled: bool = False, model: str = "GigaChat-2", scope: str = "GIGACHAT_API_PERS",
         timeout: float = 20.0, ca_bundle: str | None = None,
         verify_ssl_certs: bool = True,
+        network_policy=None,
     ):
         if not enabled or bool(credentials) == bool(access_token):
             raise ValueError("Включите API и задайте только GIGACHAT_CREDENTIALS или GIGACHAT_ACCESS_TOKEN")
@@ -74,6 +75,11 @@ class GigaChatProvider:
         if type(verify_ssl_certs) is not bool:
             raise ValueError("Проверка сертификата должна задаваться логическим значением")
         self._timeout = timeout
+        self.network_policy = network_policy
+        self.scope = scope
+        self.verify_ssl_certs = verify_ssl_certs
+        self._max_output_tokens = None
+        self.api_calls = 0
         self.last_diagnostic = None
         self._model = model
         self.usage_totals = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
@@ -92,6 +98,30 @@ class GigaChatProvider:
         """Закрыть сетевые соединения SDK после обработки заявки."""
         self._client.close()
 
+    def request_limits(self,*,timeout,max_tokens):
+        """Временно ограничить SDK 0.2.0 остатком бюджета; клиент не разделяется между заявками."""
+        from contextlib import contextmanager
+        @contextmanager
+        def limits():
+            old_timeout=self._client._settings.timeout
+            old_max=self._max_output_tokens
+            old_clients=[]
+            self._client._settings.timeout=min(self._timeout,timeout)
+            self._max_output_tokens=max_tokens
+            for attr in ('_client_instance','_auth_client_instance'):
+                client=getattr(self._client,attr,None)
+                if client is not None:
+                    old_clients.append((client,client.timeout))
+                    client.timeout=httpx.Timeout(min(self._timeout,timeout))
+            try:
+                yield
+            finally:
+                self._client._settings.timeout=old_timeout
+                self._max_output_tokens=old_max
+                for client,value in old_clients:
+                    client.timeout=value
+        return limits()
+
     def __enter__(self):
         return self
 
@@ -103,7 +133,9 @@ class GigaChatProvider:
         self.last_diagnostic = None
         self._diagnostic_stage = 'request_preparation'
         try:
-            return self._generate(payload)
+            from llm_rag.network_policy import prepare_payload
+            safe,restore=prepare_payload(payload,self.network_policy)
+            return restore(self._generate(safe))
         except Exception as error:
             self.last_diagnostic = safe_diagnostic(error, stage=self._diagnostic_stage,
                 elapsed_ms=(perf_counter() - started) * 1000)
@@ -111,10 +143,9 @@ class GigaChatProvider:
             raise
 
     def _generate(self, payload: dict) -> dict:
-        if type(payload.get("is_demo")) is not bool:
-            raise ProviderError("INVALID_DATA_PROVENANCE")
+        if payload.get("schema_version") not in {"1.0", "explanation.1", "staff-facts.2"}:
+            raise ProviderError("INVALID_PAYLOAD")
         wire_mode = payload.get('schema_version') == 'staff-facts.2'
-        staff_mode = wire_mode
         instructions = INSTRUCTIONS
         if wire_mode:
             from llm_rag.staff_report import STAFF_WIRE_INSTRUCTIONS
@@ -139,10 +170,6 @@ class GigaChatProvider:
                                for key in ("claim_id", "text", "fragment_id", "quote")},
                 "required": ["claim_id", "text", "fragment_id", "quote"],
             } for claim in payload["evidence"]]
-            staff_mode = payload.get('schema_version') == 'staff-report.1'
-            if staff_mode:
-                for alternative, claim in zip(alternatives, payload['evidence']):
-                    alternative['properties']['text']['enum'] = [claim['text'], *claim.get('allowed_texts', [])]
             schema["properties"]["claims"] = {
                 "type": "array", "minItems": len(alternatives), "maxItems": len(alternatives),
                 "uniqueItems": True,
@@ -150,10 +177,12 @@ class GigaChatProvider:
                          if alternatives else {"type": "object"},
             }
             # Инструкции заданы кодом и не берутся из входного запроса или текста документов.
-            context = {key: payload[key] for key in ("schema_version", "is_demo", "corpus_version", "item", "evidence")}
+            context = {key: payload[key] for key in ("schema_version", "corpus_version", "item", "evidence")}
         try:
+            output_limit=1500 if wire_mode else 2048
+            output_limit=min(output_limit,self._max_output_tokens or output_limit)
             request = Chat(
-                model=self._model, stream=False, function_call="none", max_tokens=1500 if wire_mode else (4096 if staff_mode else 2048),
+                model=self._model, stream=False, function_call="none", max_tokens=output_limit,
                 messages=[
                     {"role": "system", "content": instructions},
                     {"role": "user", "content": json.dumps(context, ensure_ascii=False, allow_nan=False)},
@@ -162,6 +191,7 @@ class GigaChatProvider:
                 additional_fields={"response_format": {"type": "json_schema", "schema": schema, "strict": True}},
             )
             self._diagnostic_stage = 'provider_request'
+            self.api_calls += 1
             response = self._client.chat(request)
             self._diagnostic_stage = 'provider_response'
             # Только счётчики из ответа API, без текста запроса и учётных данных.

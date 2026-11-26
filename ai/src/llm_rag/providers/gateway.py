@@ -17,6 +17,7 @@ class JsonApiProvider:
     def __init__(
         self, endpoint: str, api_key: str, *, enabled: bool = False,
         timeout: float = 20.0, transport: httpx.BaseTransport | None = None,
+        network_policy=None,
     ):
         url = urlsplit(endpoint)
         if not enabled or url.scheme != "https" or not url.hostname or url.username or url.password or url.fragment:
@@ -27,10 +28,13 @@ class JsonApiProvider:
         self._api_key = api_key
         self._timeout = timeout
         self._transport = transport
+        self.network_policy = network_policy
 
     def generate(self, payload: dict) -> dict:
-        if payload.get("is_demo") is not True:
-            raise ProviderError("DEMO_DATA_REQUIRED")
+        from llm_rag.network_policy import prepare_payload
+        payload,restore=prepare_payload(payload,self.network_policy)
+        if payload.get("schema_version") not in {"1.0", "explanation.1", "staff-facts.2"}:
+            raise ProviderError("INVALID_PAYLOAD")
         try:
             with httpx.Client(timeout=self._timeout, follow_redirects=False, trust_env=False,
                               transport=self._transport) as client:
@@ -47,7 +51,7 @@ class JsonApiProvider:
             result = json.loads(body)
             if not isinstance(result, dict):
                 raise ProviderError("INVALID_JSON_OBJECT")
-            return result
+            return restore(result)
         except httpx.TimeoutException:
             raise ProviderError("API_TIMEOUT") from None
         except httpx.HTTPError:

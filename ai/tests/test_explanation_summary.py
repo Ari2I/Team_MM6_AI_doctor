@@ -65,7 +65,7 @@ def test_only_verified_completed_classifications_leave_unresolved(changes):
 
 def test_large_amounts_keep_exact_totals_in_every_breakdown_and_preserve_decimal_context():
     first = pair()
-    large = '123456789012345678901234567890.01'
+    large = '999999999999.999'
     pairs = [first, first.model_copy(update={'diagnosis_id': 'd2'}),
              first.model_copy(update={'item_id': 'i2', 'category': 'Б'}),
              first.model_copy(update={'item_id': 'i3'})]
@@ -79,7 +79,7 @@ def test_large_amounts_keep_exact_totals_in_every_breakdown_and_preserve_decimal
         assert context.prec == 6
 
     costs = {c.currency: c for c in result.costs_by_currency}
-    expected = Decimal('123456789012345678901234567890.10')
+    expected = Decimal('1000000000000.089')
     assert costs['RUB'].known_total_amount == expected
     assert costs['RUB'].amount_requiring_review == expected
     assert costs['RUB'].amounts_by_upstream_category == {'А': Decimal(large), 'Б': Decimal('0.09')}

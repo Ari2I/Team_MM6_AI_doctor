@@ -80,7 +80,7 @@ def render_explanation(input: ExplanationInput, evidence: VerifiedEvidence, *,
         claim = next((c for c in evidence.approved_claims if c.citation == citation), None)
         allowed.append(dict(claim_id=str(index), text=claim.text if claim and result.classification_basis == 'APPROVED_RULE'
                             else 'Материал для сверки.', fragment_id=citation.fragment_id, quote=citation.quote))
-    payload = dict(schema_version='explanation.1', is_demo=True, instructions=INSTRUCTIONS,
+    payload = dict(schema_version='explanation.1', instructions=INSTRUCTIONS,
                    corpus_version=evidence.snapshot_version,
                    item={'item_id': pair_key(input)}, evidence=allowed)
     try:

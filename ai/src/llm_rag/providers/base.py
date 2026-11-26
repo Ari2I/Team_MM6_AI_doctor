@@ -4,6 +4,9 @@ from typing import Protocol
 
 
 PROVIDER_ERROR_MESSAGES = {
+    "NETWORK_POLICY_DENIED": "Внешняя передача термина не разрешена: нужен проверенный список публичных медицинских терминов.",
+    "NETWORK_CONTEXT_TOO_LARGE": "Подготовленный сетевой пакет превышает разрешённый предел контекста.",
+    "INVALID_PAYLOAD": "Сетевой пакет не соответствует разрешённой схеме.",
     "RESPONSE_ITEM_MISMATCH": "Модель вернула идентификатор другой позиции; ответ отклонён.",
     "INVALID_RESPONSE_SCHEMA": "Модель вернула ответ, который не соответствует контракту проекта.",
     "GIGACHAT_TLS_ERROR": "Не удалось проверить сертификат сервера GigaChat. Укажите доверенный CA через GIGACHAT_CA_BUNDLE_FILE.",

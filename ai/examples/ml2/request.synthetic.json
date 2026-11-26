@@ -2,7 +2,6 @@
   "schema_version": "1.0",
   "request_id": "synthetic-ml2-20261110",
   "diagnosis": "J45.9",
-  "is_demo": true,
   "context": {},
   "items": [
     {

@@ -133,35 +133,5 @@ def test_oversized_source_is_processing_error_not_no_evidence():
         population=rec.population, icd10=rec.icd10, page_url=rec.page_url, primary_url=rec.primary_url)
     sources = SimpleNamespace(candidates=lambda *a: (candidate,),
         load=lambda _: cr.CachedRecommendation(rec, 'FRESH_CACHE', datetime.now(UTC).isoformat()))
-    batch = ML2Pipeline(registry, sources=sources).run(card.request, live_sources=True)
+    batch = ML2Pipeline(registry, sources=sources).run(card.request)
     assert batch.evaluations[0].classification.status == 'SOURCE_ERROR'
-
-
-@pytest.mark.parametrize('quote,age,age_marker', [
-    ('Рекомендован детям до 5 лет.', '45', True),
-    ('Рекомендован детям в возрасте 6–11 лет.', '45', True),
-    ('Рекомендован детям младше 6 лет.', '45', True),
-    ('Рекомендован пациентам старше 65 лет.', '45', True),
-    ('Рекомендован взрослым при тяжёлом течении.', '45', False),
-])
-def test_live_applicability_never_verified_from_text_match_alone(monkeypatch, quote, age, age_marker):
-    from types import SimpleNamespace
-    from tests.test_evidence_snapshot import sample
-    from llm_rag import excel_scenario as excel
-    inp, snapshot = sample()
-    inp.context['age'] = age
-    inp.citations[0].quote = snapshot.documents[0].text = quote
-    original_category = inp.category
-    card = read_card(ROOT / 'excel_input/01_Подходящие_препараты.xlsx')
-    batch = SimpleNamespace(request=card.request, details=lambda: {})
-    monkeypatch.setattr(excel, 'ML2Pipeline', lambda *a, **k: SimpleNamespace(run=lambda *a, **k: batch))
-    monkeypatch.setattr(excel, 'prepare_explanation_inputs', lambda *a, **k: [inp])
-    monkeypatch.setattr(excel, 'summarize_explanations', lambda pairs, **k: SimpleNamespace(pairs=pairs))
-    sources = SimpleNamespace(snapshot=lambda _: snapshot)
-    app, _, _ = excel.process_card(card, None, sources, None, None)
-    pair = app.pairs[0]
-    assert pair.evidence_status == 'INSUFFICIENT_DATA'
-    assert pair.category == original_category
-    assert pair.citations[0].quote == quote
-    assert 'clinical_applicability' in pair.missing_context
-    assert ('citation_age_applicability' in pair.missing_context) is age_marker

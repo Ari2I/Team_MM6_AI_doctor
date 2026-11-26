@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from llm_rag.contracts import Category, DemoFlag, Model, Text
+from llm_rag.contracts import Category, Model, Text
 
 
 def normalize(value: str) -> str:
@@ -16,7 +16,6 @@ class Source(Model):
     title: Text
     source_type: Literal["MASTER_LIST", "PROTOCOL", "DOSAGE"]
     version: Text
-    is_demo: DemoFlag
 
 
 class Assertion(Model):
@@ -61,7 +60,6 @@ class Fragment(Model):
 
 class Corpus(Model):
     corpus_version: Text
-    is_demo: DemoFlag
     sources: list[Source] = Field(min_length=1)
     fragments: list[Fragment] = Field(min_length=1)
 

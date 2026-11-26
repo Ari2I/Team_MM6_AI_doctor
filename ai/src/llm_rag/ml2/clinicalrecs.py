@@ -24,14 +24,13 @@ import httpx
 
 from .classifier import EvidenceFragment
 from .registry import inn_key
+from llm_rag.rag_data import default_data_dir
 
 BASE_URL = "https://xn--80ahcaaarabfanddhyjjq1br6ji.xn--p1ai"
 SOURCE_HOST = "xn--80ahcaaarabfanddhyjjq1br6ji.xn--p1ai"
 OFFICIAL_HOST = "cr.minzdrav.gov.ru"
 USER_AGENT = "Vrach-AI-ML2/1.0"
-DEFAULT_CACHE = (
-    Path(__file__).resolve().parents[3] / ".local" / "official-inputs" / "clinicalrecs"
-)
+DEFAULT_CACHE = default_data_dir()/'cache/clinicalrecs'
 MAX_PAGE_BYTES = 8 * 1024 * 1024
 _EDITION = re.compile(r"\d+_\d+")
 _ICD = re.compile(r"\b[A-ZА-ЯЁ][0-9]{2}(?:\.[0-9]{1,4})?\b", re.IGNORECASE)

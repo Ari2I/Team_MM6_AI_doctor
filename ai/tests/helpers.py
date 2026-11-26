@@ -13,7 +13,7 @@ def corpus_data():
 def request_data():
     return {
         "schema_version": "1.0", "request_id": "DEMO-001", "diagnosis": "Демо-диагноз",
-        "is_demo": True, "items": [item_data()],
+        "items": [item_data()],
     }
 
 

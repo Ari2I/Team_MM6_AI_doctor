@@ -37,7 +37,11 @@ dist/
 
 # Модели, локальные данные и журналы
 /models/
-/data/
+/data/*
+!/data/rag/
+/data/rag/*
+!/data/rag/README.md
+!/data/rag/manifest.json
 /outputs/
 /results/
 /downloaded_files/
@@ -45,6 +49,7 @@ dist/
 /excel_input/*
 !/excel_input/01_Подходящие_препараты.xlsx
 !/excel_input/02_Препарат_другого_назначения.xlsx
+!/excel_input/README.md
 *.log
 *.safetensors
 *.onnx

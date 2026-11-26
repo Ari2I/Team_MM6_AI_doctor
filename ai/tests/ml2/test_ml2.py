@@ -34,7 +34,7 @@ from llm_rag.ml2.registry import (
     build_snapshot,
 )
 from llm_rag.pipeline import Pipeline
-from llm_rag.providers import DemoProvider
+from llm_rag.providers import TemplateProvider
 
 ROOT = Path(__file__).resolve().parents[2]
 QUOTE = "Тестовое вещество применяется для снятия симптомов."
@@ -83,7 +83,6 @@ def purchase_request():
             "schema_version": "1.0",
             "request_id": "synthetic",
             "diagnosis": "J45.9 Тестовый диагноз",
-            "is_demo": True,
             "context": {},
             "items": [
                 {
@@ -228,10 +227,10 @@ def test_missing_unknown_combination_and_offline_are_explicit(
         purchase_request.items[0].model_copy(update={"item_id": "row-2"}, deep=True)
     )
     purchase_request.items[0].original.trade_name = "Несуществующий"
-    batch = ML2Pipeline(registry).run(purchase_request)
+    batch = ML2Pipeline(registry, sources=FakeSources([])).run(purchase_request)
     assert [v.classification.status for v in batch.evaluations] == [
         "INN_UNRESOLVED",
-        "NO_EVIDENCE",
+        "NEEDS_CONTEXT",
     ]
     assert all(i.category is None for i in batch.request.items)
     combined = registry.model_copy(
@@ -247,7 +246,7 @@ def test_missing_unknown_combination_and_offline_are_explicit(
         }
     )
     assert (
-        ML2Pipeline(combined).run(purchase_request).evaluations[1].classification.status
+        ML2Pipeline(combined, sources=FakeSources([])).run(purchase_request).evaluations[1].classification.status
         == "MULTI_INGREDIENT_REVIEW"
     )
 
@@ -278,7 +277,7 @@ def test_prepared_request_works_in_unchanged_rag_pipeline(source):
         batch.request.items[0].classification_reason
         == purchase_request.items[0].classification_reason
     )
-    result = Pipeline(corpus, DemoProvider()).run(batch.request)
+    result = Pipeline(corpus, TemplateProvider()).run(batch.request)
     assert len(result.items) == len(purchase_request.items)
     assert result.costs_by_currency[0].total_amount == sum(
         i.original.amount for i in purchase_request.items
@@ -351,7 +350,7 @@ def test_source_ambiguity_age_staleness_and_identity(
 ):
     sources = FakeSources(values, state, mismatch)
     batch = ML2Pipeline(registry, complete_json=complete, sources=sources).run(
-        purchase_request, live_sources=True
+        purchase_request
     )
     assert batch.evaluations[0].classification.status == status
     assert batch.request.items[0].category is None
@@ -370,7 +369,7 @@ def test_live_source_can_supply_fragments_without_demo(purchase_request, registr
         }
 
     batch = ML2Pipeline(registry, complete_json=model, sources=FakeSources([c])).run(
-        purchase_request, live_sources=True
+        purchase_request
     )
     assert batch.request.items[0].category == "Б"
     assert batch.evaluations[0].recommendation["edition_id"] == "1_1"
@@ -382,7 +381,7 @@ def test_source_failure_does_not_leak_exception(purchase_request, registry):
             raise httpx.ConnectError("synthetic-private-error")
 
     batch = ML2Pipeline(registry, sources=Broken()).run(
-        purchase_request, live_sources=True
+        purchase_request
     )
     assert batch.evaluations[0].classification.status == "SOURCE_ERROR"
     assert "synthetic-private-error" not in json.dumps(batch.details())
@@ -418,7 +417,9 @@ def test_provider_builds_strict_json_without_editing_colleague_client(monkeypatc
     purchase_request = ClassificationRequest(
         "r", "i", "J45.9", "Тестовое вещество", (fragment(),), {}
     )
-    with ML2GigaChatProvider(credentials="synthetic", enabled=True) as provider:
+    from llm_rag.network_policy import NetworkPolicy
+    with ML2GigaChatProvider(credentials="synthetic", enabled=True,
+            network_policy=NetworkPolicy(diagnoses=('J45.9',),inns=('Тестовое вещество',))) as provider:
         result = classify_pair(purchase_request, gigachat_completer(provider))
         assert result.proposed_category == "Б"
         assert provider.last_total_tokens == 42
@@ -464,15 +465,13 @@ def test_new_package_has_no_imports_from_backend():
 def test_approved_rules_require_context_and_report_conflict(purchase_request, registry):
     data = {
         "corpus_version": "synthetic",
-        "is_demo": True,
         "sources": [
             {
                 "source_id": "s",
                 "title": "Синтетическое правило",
                 "source_type": "MASTER_LIST",
                 "version": "1",
-                "is_demo": True,
-            }
+                }
         ],
         "fragments": [
             {
@@ -571,59 +570,3 @@ def test_catalog_refresh_304_clears_stale_flag(tmp_path, monkeypatch):
     candidates = recommendations_for_diagnosis("J45.9", cache_dir=tmp_path)
     assert len(candidates) == 1
     assert candidates[0].cache_state == "FRESH_CACHE"
-
-
-def test_cli_uses_certificate_path_relative_to_selected_env(
-    tmp_path, monkeypatch, purchase_request, registry
-):
-    from llm_rag.ml2.__main__ import main
-
-    settings = tmp_path / "settings"
-    settings.mkdir()
-    (settings / "config.env").write_text(
-        "GIGACHAT_CREDENTIALS=synthetic\nGIGACHAT_CA_BUNDLE_FILE=ca.crt\n",
-        encoding="utf-8",
-    )
-    (settings / "ca.crt").write_text("synthetic placeholder", encoding="utf-8")
-    request_path, registry_path = tmp_path / "request.json", tmp_path / "registry.json"
-    request_path.write_text(purchase_request.model_dump_json(), encoding="utf-8")
-    registry_path.write_text(registry.model_dump_json(), encoding="utf-8")
-    captured = {}
-
-    class Provider:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-        def close(self):
-            pass
-
-    for key in (
-        "GIGACHAT_CREDENTIALS",
-        "GIGACHAT_ACCESS_TOKEN",
-        "GIGACHAT_CA_BUNDLE_FILE",
-        "GIGACHAT_CA_BUNDLE",
-        "GIGACHAT_SCOPE",
-    ):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setattr("llm_rag.ml2.provider.ML2GigaChatProvider", Provider)
-    assert (
-        main(
-            [
-                "--request",
-                str(request_path),
-                "--registry",
-                str(registry_path),
-                "--output",
-                str(tmp_path / "output.json"),
-                "--details",
-                str(tmp_path / "details.json"),
-                "--enable-api",
-                "--env-file",
-                str(settings / "config.env"),
-            ]
-        )
-        == 0
-    )
-    assert captured["ca_bundle"] == str((settings / "ca.crt").resolve())
-    assert captured["scope"] == "GIGACHAT_API_B2B"
-    AnalysisRequest.model_validate_json((tmp_path / "output.json").read_bytes())

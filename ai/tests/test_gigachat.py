@@ -46,7 +46,21 @@ def completion(raw, finish="stop"):
 
 def make_provider(**kwargs):
     from llm_rag.providers.gigachat import GigaChatProvider
+    from llm_rag.network_policy import NetworkPolicy
+    corpus=Corpus.model_validate(corpus_data())
+    base=NetworkPolicy.from_corpus(corpus)
+    kwargs.setdefault('network_policy',NetworkPolicy(base.diagnoses+('Диагноз',),base.inns+('МНН',)))
     return GigaChatProvider(credentials=AUTH_KEY, enabled=True, **kwargs)
+
+
+def test_request_limits_cap_existing_sdk_clients_and_restore_settings():
+    with make_provider() as provider:
+        original=provider._client._settings.timeout
+        with provider.request_limits(timeout=0.5,max_tokens=100):
+            assert provider._client._settings.timeout==0.5
+            assert provider._max_output_tokens==100
+        assert provider._client._settings.timeout==original
+        assert provider._max_output_tokens is None
 
 
 def test_real_sdk_receives_typed_chat_and_manages_oauth(sdk_wire, monkeypatch):
@@ -82,13 +96,13 @@ def test_real_sdk_receives_typed_chat_and_manages_oauth(sdk_wire, monkeypatch):
     assert body["function_call"] == "none"
     assert [m["role"] for m in body["messages"]] == ["system", "user"]
     context = json.loads(body["messages"][1]["content"])
-    assert context["item"]["item_id"] == "row-1"
+    assert context["item"]["item_id"] == "position-1"
     assert "instructions" not in context
     assert context["evidence"][0]["claim_id"] == "category-a"
     assert body["response_format"]["type"] == "json_schema"
     assert body["response_format"]["strict"] is True
     assert set(body["response_format"]["schema"]["required"]) == {"item_id", "claims"}
-    assert body["response_format"]["schema"]["properties"]["item_id"]["enum"] == ["row-1"]
+    assert body["response_format"]["schema"]["properties"]["item_id"]["enum"] == ["position-1"]
     assert AUTH_KEY not in chat.content.decode()
     assert "test-access" not in chat.content.decode()
     assert all("embedding" not in str(r.url) for r in sdk_wire.requests)
@@ -127,7 +141,9 @@ def test_access_token_mode_and_grounding_validation(sdk_wire):
         return httpx.Response(200, json=completion(raw))
 
     sdk_wire.handler = handler
-    client = GigaChatProvider(access_token="direct-token", enabled=True, model="GigaChat-2-Pro")
+    from llm_rag.network_policy import NetworkPolicy
+    client = GigaChatProvider(access_token="direct-token", enabled=True, model="GigaChat-2-Pro",
+        network_policy=NetworkPolicy.from_corpus(Corpus.model_validate(corpus_data())))
     result = Pipeline(Corpus.model_validate(corpus_data()), client).run(AnalysisRequest.model_validate(request_data()))
     assert len(sdk_wire.requests) == 1
     assert sdk_wire.requests[0].headers["Authorization"] == "Bearer direct-token"
@@ -204,30 +220,11 @@ def test_configuration_is_checked_before_sdk_calls(sdk_wire, kwargs):
     assert sdk_wire.requests == []
 
 
-@pytest.mark.parametrize('flag', [None, 'true', 1])
-def test_invalid_provenance_cannot_trigger_sdk_auth(sdk_wire, flag):
+def test_non_demo_data_cannot_trigger_sdk_auth(sdk_wire):
     client = make_provider()
     with pytest.raises(ProviderError):
-        client.generate({"is_demo": flag})
+        client.generate({"is_demo": False})
     assert sdk_wire.requests == []
-
-
-def test_ordinary_reference_payload_is_allowed_without_demo_flag(sdk_wire):
-    raw, _, _, _, payload = generate()
-    payload['is_demo'] = False
-
-    def handler(request):
-        if request.url.path == '/api/v2/oauth':
-            return httpx.Response(200, json={
-                'access_token': 'test-access', 'expires_at': (NOW + 1800) * 1000,
-            })
-        return httpx.Response(200, json=completion(raw))
-
-    sdk_wire.handler = handler
-    with make_provider() as client:
-        assert client.generate(payload) == raw
-    context = json.loads(json.loads(sdk_wire.requests[-1].content)['messages'][1]['content'])
-    assert context['is_demo'] is False
 
 
 def test_sdk_is_configured_with_tls_and_closed_through_provider(monkeypatch, sdk_wire):
@@ -247,7 +244,9 @@ def test_sdk_is_configured_with_tls_and_closed_through_provider(monkeypatch, sdk
 
     monkeypatch.setattr(GigaChat, "__init__", init)
     monkeypatch.setattr(GigaChat, "close", close)
-    with GigaChatProvider(access_token="direct-token", enabled=True) as client:
+    from llm_rag.network_policy import NetworkPolicy
+    with GigaChatProvider(access_token="direct-token", enabled=True,
+            network_policy=NetworkPolicy.from_corpus(Corpus.model_validate(corpus_data()))) as client:
         assert client.generate(payload) == raw
     assert settings[0]["verify_ssl_certs"] is True
     assert settings[0]["max_retries"] == 0
@@ -313,6 +312,7 @@ def test_generation_schema_limits_output_to_complete_allowed_claims(sdk_wire, wi
     sdk_wire.handler = handler
     make_provider().generate(payload)
     schema = json.loads(sdk_wire.requests[-1].content)["response_format"]["schema"]
+    raw['item_id']='position-1'
     jsonschema.validate(raw, schema)
     for field in ("claim_id", "text", "fragment_id", "quote"):
         wrong = deepcopy(raw)

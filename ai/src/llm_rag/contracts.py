@@ -27,17 +27,36 @@ def _decimal(value):
         raise ValueError("Invalid decimal") from exc
 
 
-def _demo(value):
-    if value is not True:
-        raise ValueError("Only explicitly marked synthetic demo data is supported")
-    return value
-
-
 Money = Annotated[
     Decimal, BeforeValidator(_decimal), Field(ge=0, allow_inf_nan=False),
     WithJsonSchema({"type": "string", "pattern": MONEY_PATTERN}, mode="validation"),
 ]
-DemoFlag = Annotated[Literal[True], BeforeValidator(_demo)]
+
+# До 15 десятичных цифр на покупку, включая тысячные для трёхзнаковых валют.
+AMOUNT_INTEGER_DIGITS = 12
+AMOUNT_SCALE = 3
+PURCHASE_AMOUNT_PATTERN = (
+    rf"^[+]?(?:[0-9]{{1,{AMOUNT_INTEGER_DIGITS}}}(?:\.[0-9]{{0,{AMOUNT_SCALE}}})?"
+    rf"|\.[0-9]{{1,{AMOUNT_SCALE}}})(?![\s\S])"
+)
+
+
+def _purchase_amount(value):
+    if isinstance(value, Decimal):
+        if (not value.is_finite() or value < 0 or value.as_tuple().exponent < -AMOUNT_SCALE
+                or value.adjusted() >= AMOUNT_INTEGER_DIGITS):
+            raise ValueError("Сумма покупки вне допустимого диапазона или точности.")
+        # Приводим допустимый Decimal к тому же формату, что возвращается клиенту в JSON.
+        return Decimal(format(value.copy_abs(), "f"))
+    if not isinstance(value, str) or re.fullmatch(PURCHASE_AMOUNT_PATTERN, value) is None:
+        raise ValueError("Сумма ожидается десятичной строкой до 12 целых и 3 дробных цифр.")
+    return Decimal(value)
+
+
+PurchaseMoney = Annotated[
+    Decimal, BeforeValidator(_purchase_amount),
+    WithJsonSchema({"type": "string", "pattern": PURCHASE_AMOUNT_PATTERN}),
+]
 
 
 class Model(BaseModel):
@@ -48,7 +67,7 @@ class Original(Model):
     trade_name: Text
     dosage: Text
     quantity: Annotated[int, Field(gt=0)]
-    amount: Money
+    amount: PurchaseMoney
     currency: Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
 
 
@@ -75,7 +94,6 @@ class AnalysisRequest(Model):
     request_id: Text
     diagnosis: Text
     items: Annotated[list[AnalysisItem], Field(min_length=1)]
-    is_demo: DemoFlag
     context: dict[Text, Text] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -152,7 +170,6 @@ class AnalysisResult(Model):
     costs_by_currency: list[CurrencyBreakdown]
     corpus_version: Text
     run_id: Text
-    is_demo: DemoFlag = True
     provider_name: Text
     retrieval_info: RetrievalInfo
     disclaimer: Literal[DISCLAIMER] = DISCLAIMER

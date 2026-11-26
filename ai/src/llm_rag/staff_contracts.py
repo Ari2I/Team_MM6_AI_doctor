@@ -41,7 +41,6 @@ class StaffFactPair(Model):
 
 class StaffFacts(Model):
     schema_version: Literal['staff-facts.2'] = 'staff-facts.2'
-    is_demo: Literal[True] = True
     pairs: Annotated[list[StaffFactPair], Field(min_length=1, max_length=1)]
 
 

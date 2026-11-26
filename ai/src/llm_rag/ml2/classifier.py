@@ -211,6 +211,12 @@ def _quote_options(text: str) -> list[str]:
 SYSTEM_PROMPT = load_system_prompt()
 
 
+def policy_fingerprint():
+    """Версия и SHA фактически загруженных критериев/инструкции, а не поздней правки файла."""
+    from hashlib import sha256
+    return _RULES.policy_version, sha256((_RULES.model_dump_json()+SYSTEM_PROMPT).encode()).hexdigest()
+
+
 def prompt_for(request: ClassificationRequest) -> tuple[str, str]:
     """Собрать фиксированную инструкцию и JSON-контекст для модельного адаптера."""
 
@@ -230,7 +236,6 @@ def prompt_for(request: ClassificationRequest) -> tuple[str, str]:
     payload = {
         "diagnosis": request.diagnosis,
         "inn": request.inn,
-        "clinical_context": dict(request.context),
         "fragments": [
             {
                 "fragment_id": fragment.fragment_id,
