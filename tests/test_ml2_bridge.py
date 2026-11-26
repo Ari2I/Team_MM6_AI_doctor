@@ -54,39 +54,19 @@ def test_pair_contract_keeps_missing_purchase_fields_and_real_provenance() -> No
     from llm_rag.ml2.pipeline import ML2Pipeline
     from llm_rag.ml2.registry import RegistrySnapshot
 
-    from app.services.ml2_analysis import load_pair_contracts
-
-    PairOriginal, PairItem, PairRequest, _ = load_pair_contracts()
-    request = PairRequest(
-        schema_version="1.0",
-        request_id="pair",
-        diagnosis="J45.9",
-        context={},
-        items=[
-            PairItem(
-                item_id="item",
-                original=PairOriginal(
-                    trade_name="Неизвестный препарат",
-                    dosage=None,
-                    quantity=None,
-                    amount=None,
-                    currency=None,
-                ),
-                inn=None,
-                category=None,
-                classification_reason=None,
-                dosage_check={"status": "NOT_CHECKED", "reason": None, "missing_data": []},
-                source_refs=[],
-                upstream_status="PARTIAL",
-                missing_data=[],
-            )
-        ],
-    )
+    pair = AIInput(drug_name="Неизвестный препарат", diagnosis="J45.9")
     registry = RegistrySnapshot(version="empty", as_of=datetime.now(UTC).date(), registrations=())
-    batch = ML2Pipeline(registry).run(request)
-    assert batch.request.is_demo is False
-    assert batch.request.items[0].original.model_dump() == request.items[0].original.model_dump()
-    assert batch.evaluations[0].classification.status == "INN_UNRESOLVED"
+    result = ML2Pipeline(registry).evaluate_pair(
+        request_id="pair",
+        item_id="item",
+        diagnosis=pair.diagnosis,
+        trade_name=pair.drug_name,
+        dosage=pair.dosage,
+        fragments=(),
+    )
+    assert pair.dosage is None and pair.quantity is None and pair.amount is None
+    assert result.classification.status == "INN_UNRESOLVED"
+    assert result.classification.proposed_category is None
 
 
 @pytest.fixture()

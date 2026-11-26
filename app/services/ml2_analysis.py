@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from decimal import Decimal
-from hashlib import sha256
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 
 from app.config import MODEL_ERROR_LABELS, AINetworkSettings, AISettings
@@ -16,88 +13,17 @@ from app.schemas.analysis import PairCheck
 from app.services.ai_adapter import AIInput, WorkerResult
 
 
-def load_pair_contracts() -> tuple[type[Any], type[Any], type[Any], type[Any]]:
-    """Импортировать старый AI-контракт только по явному вызову offline/network."""
-    from llm_rag.contracts import AnalysisItem, AnalysisRequest, Original
-    from llm_rag.explanation_contracts import ExplanationInput
-    from pydantic import Field
-
-    class PairOriginal(Original):
-        """Purchase fields are optional and never invented for a clinical pair."""
-
-        dosage: str | None
-        quantity: Decimal | None
-        amount: Decimal | None
-        currency: str | None
-
-    class PairItem(AnalysisItem):
-        original: PairOriginal
-
-    class PairRequest(AnalysisRequest):
-        items: list[PairItem] = Field(min_length=1)
-        is_demo: bool = Field(default=False, strict=True)
-
-    class PairExplanationInput(ExplanationInput):
-        is_demo: bool = Field(default=False, strict=True)
-
-    return PairOriginal, PairItem, PairRequest, PairExplanationInput
-
-
 def create_sources(cache: Path) -> Any:
-    """Лениво создать источник; его сетевой доступ ограничивает worker."""
-    from llm_rag.evidence_snapshot import EvidenceDocument, EvidenceSnapshot
-    from llm_rag.ml2.clinicalrecs import fragments_for_inn
-    from llm_rag.ml2.pipeline import ClinicalSources
+    from app.services.local_clinical_sources import LocalClinicalSources
 
-    class CapturedSources(ClinicalSources):
-        """Keep the parsed public text for independent verification after ML-2."""
-
-        def __init__(self, cache: Path) -> None:
-            super().__init__(cache=cache)
-            self.loaded: list[Any] = []
-            self.fragment_count = 0
-
-        def load(self, candidate: Any) -> Any:
-            cached = super().load(candidate)
-            self.loaded.append(cached)
-            return cached
-
-        def snapshot(self, pair: AIInput, mnn: str | None) -> Any:
-            documents: dict[tuple[str, str, str], EvidenceDocument] = {}
-            for cached in self.loaded:
-                rec = cached.recommendation
-                for fragment in fragments_for_inn(rec, mnn or ""):
-                    document = EvidenceDocument(
-                        source_id=fragment.source_id,
-                        fragment_id=fragment.fragment_id,
-                        title=fragment.title,
-                        version=fragment.version,
-                        url=fragment.url,
-                        copy_url=fragment.copy_url,
-                        location=fragment.location,
-                        text=fragment.text,
-                        diagnosis=pair.diagnosis,
-                        inn=mnn,
-                        retrieved_at=rec.retrieved_at,
-                    )
-                    documents[(fragment.source_id, fragment.fragment_id, fragment.version)] = (
-                        document
-                    )
-            self.fragment_count = len(documents)
-            digest = sha256(
-                "".join(d.model_dump_json() for d in documents.values()).encode()
-            ).hexdigest()
-            return EvidenceSnapshot(
-                snapshot_version="clinical-" + digest[:16], documents=list(documents.values())
-            )
-
-    return CapturedSources(cache)
+    return LocalClinicalSources(cache)
 
 
 def create_provider(timeout: float) -> Any:
     """Reuse the same SDK, scope, credentials and TLS settings as the existing adapter."""
     credentials = AINetworkSettings()
     from llm_rag.ml2.provider import ML2GigaChatProvider
+    from llm_rag.network_policy import NetworkPolicy
 
     return ML2GigaChatProvider(
         credentials=credentials.credentials.get_secret_value(),
@@ -106,6 +32,7 @@ def create_provider(timeout: float) -> Any:
         ca_bundle=credentials.ca_bundle_file or None,
         scope=credentials.scope or "GIGACHAT_API_PERS",
         timeout=timeout,
+        network_policy=NetworkPolicy(),
     )
 
 
@@ -135,18 +62,18 @@ def analyze_pair(
 
     from llm_rag.evidence_snapshot import verify_ml2_evidence
     from llm_rag.explanation import explain_pair
-    from llm_rag.ml2.classifier import gigachat_completer
+    from llm_rag.explanation_contracts import ExplanationInput
+    from llm_rag.ml2.official import SelectionError, select_edition
     from llm_rag.ml2.pipeline import ML2Pipeline
     from llm_rag.ml2.registry import RegistrySnapshot
 
-    PairOriginal, PairItem, PairRequest, PairExplanationInput = load_pair_contracts()
     diagnostics: dict[str, Any] = {"pipeline": "ml2", "live_sources": settings.live_sources}
 
-    def failure(message: str) -> WorkerResult:
+    def failure(message: str, reason: ReviewReason = ReviewReason.AI_UNAVAILABLE) -> WorkerResult:
         check = local.model_copy(
             update={
                 "needs_review": True,
-                "review_reason": ReviewReason.AI_UNAVAILABLE,
+                "review_reason": reason,
                 "source": local.source or "ГРЛС и клинические рекомендации",
                 "reference_version": local.reference_version or "unconfigured",
                 "comment": message + " Требуется ручная проверка.",
@@ -172,40 +99,10 @@ def analyze_pair(
             "Хранилище клинических рекомендаций не подключено. Обратитесь к администратору."
         )
     cache = Path(settings.clinical_cache_dir)
-    try:
-        cache.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile(dir=cache, prefix=".write-check-", delete=True):
-            pass
-    except OSError:
-        diagnostics["data_error"] = "CACHE_NOT_WRITABLE"
-        return failure("Каталог кэша клинических рекомендаций недоступен для записи.")
-
+    if not cache.is_dir():
+        diagnostics["data_error"] = "CACHE_NOT_CONFIGURED"
+        return failure("Хранилище клинических рекомендаций не подключено.")
     context = {"age_group": pair.age_group} if pair.age_group else {}
-    request = PairRequest(
-        schema_version="1.0",
-        request_id="pair",
-        diagnosis=pair.diagnosis,
-        context=context,
-        items=[
-            PairItem(
-                item_id="item",
-                original=PairOriginal(
-                    trade_name=pair.drug_name,
-                    dosage=pair.dosage,
-                    quantity=pair.quantity,
-                    amount=pair.amount,
-                    currency=None,
-                ),
-                inn=None,
-                category=None,
-                classification_reason=None,
-                dosage_check={"status": "NOT_CHECKED", "reason": None, "missing_data": []},
-                source_refs=[],
-                upstream_status="PARTIAL",
-                missing_data=[],
-            )
-        ],
-    )
     sources = create_sources(cache)
     provider: Any = None
     fields: set[str] = set()
@@ -237,6 +134,8 @@ def analyze_pair(
             diagnostics["model_calls"] += 1
             if progress:
                 progress(sent_fields=sorted(fields), tokens=tokens)
+            from llm_rag.ml2.classifier import gigachat_completer
+
             result = gigachat_completer(provider)(system, user)
             diagnostics["model_responses"] += 1
             return result
@@ -258,22 +157,62 @@ def analyze_pair(
                 progress(sent_fields=sorted(fields), tokens=tokens)
 
     try:
-        batch = ML2Pipeline(
+        # Новый run() может загружать источники. Все фрагменты готовим локально
+        # и передаём публичному evaluate_pair(), включая явно пустой набор.
+        import re
+
+        from llm_rag.ml2.classifier import EvidenceFragment
+        from llm_rag.ml2.registry import RegistryIndex, canonical_code
+
+        fragments = ()
+        candidates = ()
+        if settings.live_sources:
+            match = re.match(
+                r"^\s*([A-ZА-ЯЁ][0-9]{2}(?:\.[0-9]{1,4})?)(?=\s|:|$)", pair.diagnosis, re.IGNORECASE
+            )
+            code = canonical_code(match[1]) if match else None
+            age = {"adult": "Взрослые", "child": "Дети"}.get(pair.age_group)
+            mnn = RegistryIndex(registry).resolve(pair.drug_name, pair.dosage).mnn
+            if code and mnn:
+                candidates = sources.candidates(code, age)
+                select_edition(sources, candidates, code=code, age=age, edition=None)
+                prepared = sources.snapshot(pair, mnn)
+                fragments = tuple(
+                    EvidenceFragment(
+                        d.fragment_id,
+                        d.source_id,
+                        d.title,
+                        d.version,
+                        d.url,
+                        d.location,
+                        d.text,
+                        d.copy_url,
+                    )
+                    for d in prepared.documents
+                )
+        evaluation = ML2Pipeline(
             registry,
             sources=sources,
             complete_json=complete if settings.mode == "network" else None,
-        ).run(request, live_sources=settings.live_sources)
-        evaluation = batch.evaluations[0]
+        ).evaluate_pair(
+            request_id="pair",
+            item_id="item",
+            diagnosis=pair.diagnosis,
+            trade_name=pair.drug_name,
+            dosage=pair.dosage,
+            context=context,
+            fragments=fragments,
+        )
         result = evaluation.classification
         snapshot = sources.snapshot(pair, result.inn)
         diagnostics.update(
             ml2_status=result.status.value,
-            candidate_count=len(evaluation.candidates),
+            candidate_count=len(candidates),
             fragment_count=sources.fragment_count,
             cache_states=[value.cache_state for value in sources.loaded],
             evidence_citations=len(result.citations),
         )
-        input_value = PairExplanationInput(
+        input_value = ExplanationInput(
             request_id="pair",
             item_id="item",
             diagnosis_id="diagnosis",
@@ -321,7 +260,6 @@ def analyze_pair(
             ]
             payload = dict(
                 schema_version="1.0",
-                is_demo=False,
                 corpus_version=snapshot.snapshot_version,
                 item=dict(
                     item_id="item",
@@ -390,6 +328,17 @@ def analyze_pair(
             diagnostics=diagnostics,
             tokens=tokens or None,
             sent_fields=sorted(fields),
+        )
+    except SelectionError as error:
+        diagnostics["ml2_status"] = error.status
+        return failure(
+            "Применимость редакции клинических рекомендаций требует уточнения.",
+            ReviewReason.AI_REVIEW_REQUIRED,
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        diagnostics["data_error"] = "CLINICAL_CACHE_INVALID"
+        return failure(
+            "Локальный кэш клинических рекомендаций отсутствует, устарел или не подтверждён."
         )
     finally:
         if provider is not None:
