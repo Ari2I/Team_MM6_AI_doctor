@@ -116,7 +116,10 @@ finally:
 
 
 @pytest.mark.parametrize("mode", ["template", "offline"])
-def test_no_provider_created_in_local_modes(mode: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("rag_environment", [False, True])
+def test_no_provider_created_in_local_modes(
+    mode: str, rag_environment: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from app.services import ml2_analysis, standard_analysis
 
     def forbidden(*args: Any, **kwargs: Any) -> Any:
@@ -124,12 +127,22 @@ def test_no_provider_created_in_local_modes(mode: str, monkeypatch: pytest.Monke
 
     monkeypatch.setattr(ml2_analysis, "create_provider", forbidden)
     monkeypatch.setattr(standard_analysis, "create_provider", forbidden)
+    if rag_environment:
+        monkeypatch.setenv("AI_REGISTRY_PATH", "/unused/registry.json")
+        monkeypatch.setenv("AI_CLINICAL_CACHE_DIR", "/unused/clinicalrecs")
+        monkeypatch.setenv("AI_LIVE_SOURCES", "true")
+        monkeypatch.setenv("AI_CORPUS_PATH", "/unused/corpus.json")
+    # Этот тест проверяет обычный локальный путь. RAG-пути отдельно покрыты
+    # test_ml2_bridge/test_local_clinical_sources и не наследуются из Compose.
+    settings = AISettings(
+        mode=mode, registry_path="", clinical_cache_dir="", live_sources=False, corpus_path=""
+    )
     check = PairCheck(category="А", source="Правило", reference_version="test")
     result = ai_worker.execute(
         {
             "pair": AIInput(drug_name="Тест", mnn="Тест", diagnosis="Тест").model_dump(),
             "local": check.model_dump(mode="json"),
-            "settings": AISettings(mode=mode).model_dump(),
+            "settings": settings.model_dump(),
             "timeout": 5,
         }
     )
