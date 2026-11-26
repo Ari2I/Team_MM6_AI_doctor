@@ -5,7 +5,7 @@
 Условия остаются локальными: сериализация не разрешает их отправку провайдеру.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -16,11 +16,33 @@ from llm_rag.corpus import normalize
 from llm_rag.staff_contracts import StaffAnalysis
 
 
+AgeGroup = Literal["adult", "child"]
+
+
 class LocalConditions(Model):
     """Известные условия применимости; отсутствие значения не означает отрицание."""
 
     age_years: Money | None = None
+    age_group: AgeGroup | None = None
     pregnant: bool | None = None
+
+    def _group_from_years(self) -> AgeGroup | None:
+        if self.age_years is None:
+            return None
+        return "adult" if self.age_years >= 18 else "child"
+
+    @model_validator(mode="after")
+    def validate_age_group(self) -> Self:
+        group_from_years = self._group_from_years()
+        if self.age_group is not None and group_from_years is not None and self.age_group != group_from_years:
+            raise ValueError("Возрастная группа age_group противоречит точному возрасту age_years.")
+        return self
+
+    @property
+    def recommendation_population(self) -> str | None:
+        """Возрастная группа в обозначениях рубрикатора Минздрава."""
+        group = self._group_from_years() or self.age_group
+        return {"adult": "Взрослые", "child": "Дети"}.get(group)
 
 
 class IntegrationDiagnosis(Model):
