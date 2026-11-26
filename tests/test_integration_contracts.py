@@ -124,6 +124,45 @@ def test_local_conditions_and_pinned_versions():
         model().model_validate(data)
 
 
+@pytest.mark.parametrize(
+    "conditions,group,years",
+    [
+        ({}, None, None),
+        ({"age_group": None}, None, None),
+        ({"age_group": "adult"}, "adult", None),
+        ({"age_group": "child"}, "child", None),
+        ({"age_years": "17.99"}, None, Decimal("17.99")),
+        ({"age_group": "child", "age_years": "17.99"}, "child", Decimal("17.99")),
+        ({"age_group": "adult", "age_years": "18"}, "adult", Decimal("18")),
+    ],
+)
+def test_public_age_group_is_optional_and_preserves_original_age(conditions, group, years):
+    data = request_data()
+    data["diagnoses"][0]["conditions"] = conditions
+    request = model().model_validate_json(json.dumps(data))
+    actual = request.diagnoses[0].conditions
+    assert actual.age_group == group
+    assert actual.age_years == years
+    assert model().model_validate_json(request.model_dump_json()) == request
+
+
+@pytest.mark.parametrize("group,years", [("adult", "17.99"), ("child", "18")])
+def test_public_age_group_rejects_conflicting_exact_age(group, years):
+    data = request_data()
+    data["diagnoses"][0]["conditions"] = {"age_group": group, "age_years": years}
+    with pytest.raises(ValidationError, match="противоречит"):
+        model().model_validate(data)
+
+
+@pytest.mark.parametrize("group", ["other", "Adult", "Взрослые", True])
+def test_public_age_group_rejects_non_contract_values(group):
+    data = request_data()
+    data["diagnoses"][0]["conditions"] = {"age_group": group}
+    with pytest.raises(ValidationError) as error:
+        model().model_validate(data)
+    assert error.value.errors()[0]["type"] == "literal_error"
+
+
 def test_independent_fixture_matrix_matches_public_contract():
     path = Path(__file__).resolve().parents[1] / "excel_cases/multidiagnosis_20261117/manifest.json"
     cases = json.loads(path.read_text(encoding="utf-8"))["cases"]

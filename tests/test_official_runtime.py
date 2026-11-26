@@ -1,7 +1,10 @@
 """Публичный фасад получает каталог, редакцию и эмбеддинги без переключателей."""
 import json
 
+import pytest
+
 from llm_rag.integration import analyze_request, IntegrationOptions
+from llm_rag.integration_contracts import LocalConditions
 from llm_rag.ml2.pipeline import ML2Pipeline
 from tests.test_integration import request as multi_request
 from tests.test_integration_model import FakeClient, model_request, resources
@@ -75,6 +78,87 @@ def test_registry_failure_is_visible_to_backend(monkeypatch):
     result = analyze_request(model_request())
     assert result.pairs[0].reasons == ["SOURCE_ERROR"]
     assert result.usage.calls == 0
+
+
+@pytest.mark.parametrize(
+    "conditions,expected_edition",
+    [
+        ({"age_group": "adult"}, "7_2"),
+        ({"age_group": "child"}, "8_1"),
+        ({}, None),
+        ({"age_years": "17.99"}, "8_1"),
+        ({"age_group": "adult", "age_years": "54.25"}, "7_2"),
+    ],
+)
+def test_public_facade_selects_age_edition_and_sends_only_public_data(
+    monkeypatch, tmp_path, conditions, expected_edition,
+):
+    from llm_rag import runtime
+    from llm_rag.ml2 import official
+
+    calls = []
+    classification_payloads, generation_payloads = [], []
+
+    class RecordingClient(OfficialClient):
+        def complete_json(self, payload, system, schema):
+            classification_payloads.append(payload)
+            return super().complete_json(payload, system, schema)
+
+        def generate(self, payload):
+            generation_payloads.append(payload)
+            return super().generate(payload)
+
+    client = RecordingClient()
+    registry = resources(client).registry
+    vector = FixedEmbedder()
+    rows = [
+        dict(id=edition, age=age, status=0, apply_status="Применяется", name="J45.9",
+             Mkb=["J45"], publish_date="2026-01-01")
+        for edition, age in [("7_2", 1), ("8_1", 2)]
+    ]
+
+    def public_json(operation, *, deadline, **params):
+        calls.append((operation, params))
+        if operation == "GetJsonClinrecs":
+            return rows
+        row = next(r for r in rows if r["id"] == params["id"])
+        return dict(row, adult=row["age"] == 1, child=row["age"] == 2, mkb="J45",
+                    obj={"sections": [dict(title="3. Лечение", content=f"<p>{QUOTE}</p>")]})
+
+    monkeypatch.setattr(official, "_get", public_json)
+    monkeypatch.setattr(runtime, "_registry", lambda *args: registry)
+    monkeypatch.setattr(runtime, "source_root", lambda: None)
+    monkeypatch.setattr(runtime, "default_data_dir", lambda: tmp_path)
+    monkeypatch.delenv("RAG_NETWORK_TERMS", raising=False)
+    monkeypatch.setattr(runtime, "ML2GigaChatProvider", lambda **_: client)
+    monkeypatch.setattr(runtime, "corpus_embedder", lambda *args, **kwargs: vector)
+    request = model_request()
+    request.diagnoses[0].icd10 = "J45.9"
+    request.diagnoses[0].conditions = LocalConditions.model_validate(conditions)
+
+    result = analyze_request(request)
+
+    assert calls[0] == ("GetJsonClinrecs", {})
+    pair = result.pairs[0]
+    if expected_edition is None:
+        assert len(calls) == 1
+        assert pair.reasons == ["NEEDS_CONTEXT"]
+        assert not (classification_payloads or generation_payloads or vector.queries)
+        return
+    assert calls[1:] == [("GetClinrec", {"id": expected_edition})]
+    assert pair.generation_mode == "MODEL"
+    assert pair.citations[0].url.endswith("/" + expected_edition)
+    assert "context.age_group" not in pair.explanation.missing_context
+    assert result.request.diagnoses[0].conditions == request.diagnoses[0].conditions
+    assert len(classification_payloads) == len(generation_payloads) == 1
+    assert len(vector.document_batches) == len(vector.queries) == 1
+    external_payloads = json.dumps(
+        [classification_payloads, generation_payloads, vector.document_batches, vector.queries],
+        ensure_ascii=False,
+    )
+    for forbidden in ('"age"', '"age_group"', '"age_years"', '"conditions"', '"clinical_context"',
+                      'adult', 'child', 'Взрослые', 'Дети', '17.99', '54.25'):
+        assert forbidden not in external_payloads
 
 
 def test_diagnosis_names_checked_for_each_code_and_edition(monkeypatch, tmp_path):

@@ -1,6 +1,7 @@
 """Встраиваемый фасад: явные пары, локальные ресурсы и ограниченный бюджет."""
 
 from dataclasses import dataclass
+from decimal import Decimal
 import re
 from copy import deepcopy
 from hashlib import sha256
@@ -67,11 +68,13 @@ class IntegrationOptions:
             raise ValueError("Срок обработки должен быть конечным положительным числом.")
 
 
-def _age_requires_review(quote, age):
-    """Отметить явные возрастные границы; это сигнал сверки, не медицинский разбор."""
-    if not age or not age.isdigit():
-        return False
-    years = int(age)
+def _age_requires_review(quote: str, years: Decimal | None) -> bool:
+    """Отметить числовой возраст для сверки или проверить известные границы."""
+    if years is None:
+        return bool(re.search(
+            r"\b\d+(?:[.,]\d+)?\s*(?:лет\b|год(?:а|ов)?\b|месяц(?:а|ев)?\b|[-–]летн\w+)",
+            quote, re.IGNORECASE,
+        ))
     for low, high in re.findall(r"(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*(?:лет|год)", quote):
         if not int(low) <= years <= int(high):
             return True
@@ -83,6 +86,16 @@ def _age_requires_review(quote, age):
             return True
     for limit in re.findall(r"старше\s+(\d{1,3})\s*(?:лет|год)", quote, re.IGNORECASE):
         if years <= int(limit):
+            return True
+    for limit in re.findall(r"\b(?:от|с)\s+(\d{1,3})\s*(?:лет|год)", quote, re.IGNORECASE):
+        if years < int(limit):
+            return True
+    for limit, direction in re.findall(
+        r"\b(\d{1,3})\s*(?:лет|год(?:а|ов)?)\s+и\s+(старше|младше)\b", quote, re.IGNORECASE,
+    ):
+        boundary = int(limit)
+        if (direction.casefold() == "старше" and years < boundary
+                or direction.casefold() == "младше" and years > boundary):
             return True
     return False
 
@@ -297,7 +310,8 @@ def _analyze_request(
                 context["icd10"] = diagnosis.icd10
             if (age := diagnosis.conditions.age_years) is not None:
                 context["age"] = str(age)
-                context["age_group"] = "Взрослые" if age >= 18 else "Дети"
+            if (population := diagnosis.conditions.recommendation_population) is not None:
+                context["age_group"] = population
             if diagnosis.conditions.pregnant is not None:
                 context["pregnant"] = str(diagnosis.conditions.pregnant).lower()
 
@@ -382,15 +396,25 @@ def _analyze_request(
                 context=context,
                 dosage_check=evaluation.dosage_check,
             )
-            if inp.citations and not evaluation.rule_applied:
-                # Сверка текста цитаты не устанавливает её клиническую применимость.
-                inp.missing_context = sorted({*inp.missing_context, "clinical_applicability"})
-                if any(_age_requires_review(c.quote, context.get("age")) for c in inp.citations):
-                    inp.missing_context.append("citation_age_applicability")
-                if "age" not in context and any(
-                    re.search(r"возраст|\bлет\b|детям|детей|взросл", c.quote, re.I) for c in inp.citations
-                ):
-                    inp.missing_context.append("context.age")
+            if inp.citations:
+                unapproved = not evaluation.rule_applied
+                if unapproved:
+                    # Сверка текста цитаты не устанавливает её клиническую применимость.
+                    inp.missing_context = sorted({*inp.missing_context, "clinical_applicability"})
+                if age is not None:
+                    if (unapproved or diagnosis.conditions.age_group is not None) and any(
+                        _age_requires_review(c.quote, age) for c in inp.citations
+                    ):
+                        inp.missing_context.append("citation_age_applicability")
+                else:
+                    has_group = "age_group" in context
+                    age_hint = r"возраст|\bлет\b" if has_group else r"возраст|\bлет\b|детям|детей|взросл"
+                    # Даже согласованная категория оставляет числовое условие на сверке.
+                    if (
+                        has_group and any(_age_requires_review(c.quote, None) for c in inp.citations)
+                        or unapproved and any(re.search(age_hint, c.quote, re.I) for c in inp.citations)
+                    ):
+                        inp.missing_context.append("context.age")
             evidence = verify_ml2_evidence(inp, snapshot, approved_corpus=approved)
             explanation = explain_pair(inp, evidence)
             reasons = {

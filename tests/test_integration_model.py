@@ -3,6 +3,8 @@
 from contextlib import contextmanager
 from datetime import date
 
+import pytest
+
 from tests.test_integration import request
 from tests.ml2.test_ml2 import fragment, complete
 from llm_rag.evidence_snapshot import EvidenceSnapshot, EvidenceDocument
@@ -122,6 +124,104 @@ def test_public_recommendation_respects_local_age_and_requires_clinical_review()
             assert pair.citations and pair.evidence_status == "INSUFFICIENT_DATA"
             assert "clinical_applicability" in pair.explanation.missing_context
             assert ("context.age_group" in pair.explanation.missing_context) == (age is None)
+
+
+@pytest.mark.parametrize(
+    "group,allowed,excluded,patients,needs_exact_age",
+    [
+        ("adult", "Взрослые", "Дети", "у пациентов старше 65 лет", True),
+        ("child", "Дети", "Взрослые", "у пациентов младше 10 лет", True),
+        ("adult", "Взрослые", "Дети", "у взрослых", False),
+    ],
+)
+def test_group_filters_fragments_but_does_not_confirm_numeric_age_limit(
+    group, allowed, excluded, patients, needs_exact_age,
+):
+    from dataclasses import replace
+    from llm_rag.integration import _run
+    from llm_rag.integration_contracts import LocalConditions
+
+    quote = f"Тестовое вещество применяется {patients}."
+
+    class AgeClient(FakeClient):
+        def complete_json(self, payload, system, schema):
+            self.fragment_ids = [part["fragment_id"] for part in payload["fragments"]]
+            response = super().complete_json(payload, system, schema)
+            response["evidence"][0]["quote"] = quote
+            return response
+
+    request = model_request()
+    request.diagnoses[0].conditions = LocalConditions.model_validate({"age_group": group})
+    client = AgeClient()
+    local = resources(client)
+    doc = local.evidence.documents[0]
+    documents = [
+        doc.model_copy(update={"text": quote, "required_context": {"age_group": allowed}}),
+        doc.model_copy(update={"fragment_id": "opposite-group", "required_context": {"age_group": excluded}}),
+    ]
+    result = _run(request, resources=replace(local, evidence=EvidenceSnapshot(
+        snapshot_version="s-age", documents=documents,
+    )))
+
+    pair = result.pairs[0]
+    assert client.fragment_ids == [doc.fragment_id]
+    assert pair.citations[0].quote == quote
+    assert pair.evidence_status == "INSUFFICIENT_DATA"
+    assert ("context.age" in pair.explanation.missing_context) == needs_exact_age
+    assert "context.age_group" not in pair.explanation.missing_context
+    assert result.request.diagnoses[0].conditions.age_years is None
+
+
+@pytest.mark.parametrize(
+    "restriction,age_years,status",
+    [
+        ("старше 65 лет", None, "INSUFFICIENT_DATA"),
+        ("от 65 лет", None, "INSUFFICIENT_DATA"),
+        ("65 лет и старше", None, "INSUFFICIENT_DATA"),
+        ("старше 65 лет", "54.25", "INSUFFICIENT_DATA"),
+        ("65 лет и старше", "64.5", "INSUFFICIENT_DATA"),
+        ("старше 65 лет", "68", "VERIFIED"),
+    ],
+)
+def test_approved_rule_with_numeric_age_limit_needs_exact_age(restriction, age_years, status):
+    from dataclasses import replace
+    from llm_rag.corpus import Corpus
+    from llm_rag.integration import _run
+    from llm_rag.integration_contracts import LocalConditions
+
+    quote = f"Тестовое вещество применяется для пациентов {restriction}."
+    request = model_request()
+    request.diagnoses[0].conditions = LocalConditions.model_validate({
+        "age_group": "adult", "age_years": age_years,
+    })
+    local = resources(FakeClient())
+    doc = local.evidence.documents[0].model_copy(update={
+        "text": quote, "required_context": {"age_group": "Взрослые"},
+    })
+    corpus = Corpus.model_validate({
+        "corpus_version": "approved",
+        "sources": [{"source_id": doc.source_id, "title": doc.title,
+                     "source_type": "PROTOCOL", "version": doc.version}],
+        "fragments": [{"fragment_id": doc.fragment_id, "source_id": doc.source_id,
+                       "location": doc.location, "inn": doc.inn, "diagnosis": doc.diagnosis,
+                       "required_context": doc.required_context, "text": quote,
+                       "assertions": [{"claim_id": "rule-age", "kind": "CATEGORY", "category": "А",
+                                       "dosage_status": None, "dosage": None,
+                                       "upstream_reason": "Согласованное основание", "text": quote, "quote": quote}]}],
+    })
+    result = _run(request, resources=replace(local, approved_corpus=corpus, evidence=EvidenceSnapshot(
+        snapshot_version="s-approved-age", documents=[doc],
+    )))
+
+    pair = result.pairs[0]
+    assert pair.decision.upstream_rule_category == "А"
+    assert pair.citations[0].quote == quote
+    assert pair.evidence_status == status
+    assert ("context.age" in pair.explanation.missing_context) == (age_years is None)
+    if age_years is not None and status == "INSUFFICIENT_DATA":
+        assert "citation_age_applicability" in pair.explanation.missing_context
+    if status == "INSUFFICIENT_DATA":
+        assert "не хватает сведений" in result.human_report["items"][0]["evidence"]
 
 
 def test_token_budget_stops_before_external_invocation():

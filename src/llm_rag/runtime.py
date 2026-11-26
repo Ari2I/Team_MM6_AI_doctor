@@ -51,8 +51,7 @@ def _clinical(request, registry, sources, deadline, links, *, diagnosis_aliases=
             break
         diagnosis, purchase = diagnoses[link.diagnosis_id], purchases[link.item_id]
         key = (link.item_id, link.diagnosis_id)
-        age = diagnosis.conditions.age_years
-        group = None if age is None else ("Взрослые" if age >= 18 else "Дети")
+        group = diagnosis.conditions.recommendation_population
         try:
             rec = select(diagnosis.icd10, group, diagnosis.recommendation_edition)
             name = normalize(diagnosis.name)
