@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException
 from app.config import CATEGORY_LABELS, DISCLAIMER, get_access_settings, get_validation_settings
 from app.models import (
     Application,
+    ApplicationAIResult,
     ApplicationDiagnosis,
     ApplicationItem,
     ApplicationStatus,
@@ -24,6 +25,7 @@ from app.models import (
     ReferenceVersion,
     ValidationIssue,
 )
+from app.schemas.ai_report import AIReport
 from app.schemas.application_api import (
     APIErrors,
     APIIssue,
@@ -33,6 +35,7 @@ from app.schemas.application_api import (
     CheckDetails,
     ItemDetails,
 )
+from app.services.ai_reports import AIReportError, read_ai_report
 from app.services.analysis import analyze_application
 from app.services.excel_parser import ExcelParseError, parse_excel
 from app.services.presentation import humanize_warning_text
@@ -303,6 +306,41 @@ def get_application(
             },
         )
     return _card(application, session)
+
+
+@router.get(
+    "/{application_id}/ai-report",
+    response_model=AIReport,
+    summary="Прочитать сохранённый ИИ-отчёт",
+    responses={
+        404: {"model": APIErrors, "description": "Заявка не найдена"},
+        409: {"model": APIErrors, "description": "Сохранённый ИИ-отчёт отсутствует"},
+        422: {"model": APIErrors, "description": "Недопустимый идентификатор"},
+    },
+)
+def get_ai_report(
+    application_id: UUID, session: Annotated[Session, Depends(get_session)]
+) -> AIReport | JSONResponse:
+    if session.get(Application, application_id) is None:
+        code, message, status_code = "not_found", "Заявка не найдена.", 404
+    else:
+        stored = session.get(ApplicationAIResult, application_id)
+        if stored is not None:
+            try:
+                return read_ai_report(stored)
+            except AIReportError:
+                raise HTTPException(status_code=500) from None
+        code, message, status_code = (
+            "report_not_ready",
+            "Сохранённый ИИ-отчёт пока недоступен.",
+            409,
+        )
+    return JSONResponse(
+        status_code=status_code,
+        content=APIErrors(
+            errors=[APIIssue(level="critical", code=code, message=message)]
+        ).model_dump(mode="json"),
+    )
 
 
 @router.get(

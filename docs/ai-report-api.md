@@ -112,3 +112,40 @@ IntegrationResult со снимком оснований; `checks` JSONB — с�
 GET повторяется без сети и AI-библиотеки; ответы 404/409/422 безопасны.
 Карточка/Excel и запрет сети локальных режимов сохраняются. Реальный фасад,
 поддержка age_group новой AI-ревизии и frontend в этом шаге не подключаются.
+
+### Команды контейнерной проверки
+
+В прежнем терминале с функцией dc_rag и экспортированными настройками запуска:
+
+```bash
+export API_BUILD_TARGET=ai-offline AI_MODE=template
+dc_rag up --build --force-recreate -d --wait --wait-timeout 180 api web
+dc_rag cp sample_api_response.json api:/app/sample_api_response.json
+dc_rag exec -T api alembic upgrade head
+dc_rag exec -T api alembic check
+dc_rag exec -T api python - <<'PY'
+import os
+import pytest
+for key in ('DOCS_ENABLED', 'LIST_ENDPOINT_ENABLED', 'ENABLE_API_DOCS'):
+    os.environ.pop(key, None)
+os.environ['RUN_POSTGRES_TESTS'] = '1'
+os.environ['ENABLE_APPLICATION_LIST'] = 'true'
+raise SystemExit(pytest.main([
+    '-q', '-rs', '--tb=no',
+    'tests/test_ai_reports.py',
+    'tests/test_ai_reports_postgres.py',
+    'tests/test_ai_isolation.py',
+    'tests/test_integration_mapping.py',
+]))
+PY
+```
+
+Без настроенного RAG-стека использовать функцию dc из предыдущей инструкции;
+новым тестам реальные RAG-данные не нужны. Копирование sample_api_response.json —
+обход прежнего отсутствия тестовой фикстуры в Dockerfile, сам образ в этом шаге
+не изменяется. Тесты используют синтетические заявки в откатываемых транзакциях;
+публичный маршрут сохранения результата не добавляется.
+
+Для существующих заявок без AI-результата GET нового маршрута сейчас возвращает
+409 — это ожидаемо, пока сетевой worker не подключён. Корректный ответ 200 и
+повторное чтение проверяются синтетическими PostgreSQL/HTTP-тестами выше.

@@ -1,6 +1,7 @@
 """Все модели импортируются здесь для регистрации метаданных Alembic."""
 
 from app.db.base import Base
+from app.models.ai_result import ApplicationAIResult
 from app.models.application import (
     Application,
     ApplicationDiagnosis,
@@ -13,6 +14,7 @@ from app.models.reference import ReferenceDiagnosis, ReferenceDrug, ReferenceRul
 
 __all__ = [
     "Application",
+    "ApplicationAIResult",
     "ApplicationDiagnosis",
     "ApplicationItem",
     "ItemCheck",
