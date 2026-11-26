@@ -18,6 +18,8 @@ from app.schemas.analysis import PairCheck
 from app.services import ai_adapter, ai_worker
 from app.services.ai_adapter import AIAdapter, AIInput, backend_category, module_category
 
+pytestmark = pytest.mark.usefixtures("no_network")
+
 
 @pytest.fixture
 def pair() -> AIInput:

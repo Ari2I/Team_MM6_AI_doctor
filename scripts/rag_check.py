@@ -117,7 +117,7 @@ def main() -> int:
     if args.network_sources:
         for url in ("https://grls.rosminzdrav.ru/GRLS.aspx", BASE_URL + "/"):
             try:
-                with httpx.Client(timeout=15, follow_redirects=True) as client:
+                with httpx.Client(timeout=15, follow_redirects=True, verify=True) as client:
                     response = client.get(url)
                 emit(
                     "source_access",
@@ -160,7 +160,7 @@ def main() -> int:
 
     if args.api_url:
         try:
-            with httpx.Client(timeout=660) as client:
+            with httpx.Client(timeout=660, verify=True) as client:
                 response = client.post(
                     args.api_url.rstrip("/") + "/applications",
                     files={
@@ -201,7 +201,7 @@ def main() -> int:
             if not card["items"] or not any(item["mnn"] for item in card["items"]):
                 failed = True
             identifier = card["application"]["id"]
-            with httpx.Client(timeout=30) as client:
+            with httpx.Client(timeout=30, verify=True) as client:
                 saved = client.get(args.api_url.rstrip("/") + f"/applications/{identifier}")
                 saved.raise_for_status()
                 emit("backend_saved_card", status="OK" if saved.json() == card else "FAILED")
@@ -225,7 +225,7 @@ def main() -> int:
             return 1
     else:
         settings = AISettings(
-            mode="network" if args.model else "template",
+            mode="network" if args.model else "offline",
             corpus_path="",
             registry_path=str(args.registry),
             clinical_cache_dir=str(args.cache),

@@ -102,11 +102,7 @@ class AIAdapter:
         self.last_sent_fields = []
         self.last_mnn = None
         self.last_diagnostics = {}
-        if self.settings.mode == "template" and not (
-            self.settings.registry_path
-            or self.settings.clinical_cache_dir
-            or self.settings.live_sources
-        ):
+        if self.settings.mode == "template":
             return local
         if not pair.drug_name.strip() or not pair.diagnosis.strip():
             return self._fallback(local, ReviewReason.AI_INPUT_INCOMPLETE)

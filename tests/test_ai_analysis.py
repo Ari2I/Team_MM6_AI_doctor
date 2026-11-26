@@ -69,6 +69,7 @@ def demo_application() -> tuple[Application, ReferenceSnapshot]:
     return application, snapshot
 
 
+@pytest.mark.usefixtures("no_network")
 def test_pair_failure_does_not_fail_application(monkeypatch: pytest.MonkeyPatch) -> None:
     application, snapshot = demo_application()
     session = MemorySession(application)
@@ -109,6 +110,7 @@ def test_conflict_preserves_ai_failure_code() -> None:
     assert all(check.needs_review for check in checks)
 
 
+@pytest.mark.usefixtures("no_network")
 def test_real_offline_application(monkeypatch: pytest.MonkeyPatch) -> None:
     if not Path("ai/src/llm_rag/pipeline.py").is_file():
         pytest.skip("В template-образе AI намеренно отсутствует")

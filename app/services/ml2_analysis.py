@@ -10,83 +10,88 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from llm_rag.contracts import AnalysisItem, AnalysisRequest, Original
-from llm_rag.evidence_snapshot import EvidenceDocument, EvidenceSnapshot, verify_ml2_evidence
-from llm_rag.explanation import explain_pair
-from llm_rag.explanation_contracts import ExplanationInput
-from llm_rag.ml2.classifier import gigachat_completer
-from llm_rag.ml2.clinicalrecs import fragments_for_inn
-from llm_rag.ml2.pipeline import ClinicalSources, ML2Pipeline
-from llm_rag.ml2.registry import RegistrySnapshot
-from pydantic import Field
-
 from app.config import MODEL_ERROR_LABELS, AINetworkSettings, AISettings
 from app.models.enums import ReviewReason
 from app.schemas.analysis import PairCheck
 from app.services.ai_adapter import AIInput, WorkerResult
 
 
-class PairOriginal(Original):
-    """Purchase fields are optional and never invented for a clinical pair."""
+def load_pair_contracts() -> tuple[type[Any], type[Any], type[Any], type[Any]]:
+    """Импортировать старый AI-контракт только по явному вызову offline/network."""
+    from llm_rag.contracts import AnalysisItem, AnalysisRequest, Original
+    from llm_rag.explanation_contracts import ExplanationInput
+    from pydantic import Field
 
-    dosage: str | None
-    quantity: Decimal | None
-    amount: Decimal | None
-    currency: str | None
+    class PairOriginal(Original):
+        """Purchase fields are optional and never invented for a clinical pair."""
+
+        dosage: str | None
+        quantity: Decimal | None
+        amount: Decimal | None
+        currency: str | None
+
+    class PairItem(AnalysisItem):
+        original: PairOriginal
+
+    class PairRequest(AnalysisRequest):
+        items: list[PairItem] = Field(min_length=1)
+        is_demo: bool = Field(default=False, strict=True)
+
+    class PairExplanationInput(ExplanationInput):
+        is_demo: bool = Field(default=False, strict=True)
+
+    return PairOriginal, PairItem, PairRequest, PairExplanationInput
 
 
-class PairItem(AnalysisItem):
-    original: PairOriginal
+def create_sources(cache: Path) -> Any:
+    """Лениво создать источник; его сетевой доступ ограничивает worker."""
+    from llm_rag.evidence_snapshot import EvidenceDocument, EvidenceSnapshot
+    from llm_rag.ml2.clinicalrecs import fragments_for_inn
+    from llm_rag.ml2.pipeline import ClinicalSources
 
+    class CapturedSources(ClinicalSources):
+        """Keep the parsed public text for independent verification after ML-2."""
 
-class PairRequest(AnalysisRequest):
-    items: list[PairItem] = Field(min_length=1)
-    is_demo: bool = Field(default=False, strict=True)
+        def __init__(self, cache: Path) -> None:
+            super().__init__(cache=cache)
+            self.loaded: list[Any] = []
+            self.fragment_count = 0
 
+        def load(self, candidate: Any) -> Any:
+            cached = super().load(candidate)
+            self.loaded.append(cached)
+            return cached
 
-class PairExplanationInput(ExplanationInput):
-    is_demo: bool = Field(default=False, strict=True)
+        def snapshot(self, pair: AIInput, mnn: str | None) -> Any:
+            documents: dict[tuple[str, str, str], EvidenceDocument] = {}
+            for cached in self.loaded:
+                rec = cached.recommendation
+                for fragment in fragments_for_inn(rec, mnn or ""):
+                    document = EvidenceDocument(
+                        source_id=fragment.source_id,
+                        fragment_id=fragment.fragment_id,
+                        title=fragment.title,
+                        version=fragment.version,
+                        url=fragment.url,
+                        copy_url=fragment.copy_url,
+                        location=fragment.location,
+                        text=fragment.text,
+                        diagnosis=pair.diagnosis,
+                        inn=mnn,
+                        retrieved_at=rec.retrieved_at,
+                    )
+                    documents[(fragment.source_id, fragment.fragment_id, fragment.version)] = (
+                        document
+                    )
+            self.fragment_count = len(documents)
+            digest = sha256(
+                "".join(d.model_dump_json() for d in documents.values()).encode()
+            ).hexdigest()
+            return EvidenceSnapshot(
+                snapshot_version="clinical-" + digest[:16], documents=list(documents.values())
+            )
 
-
-class CapturedSources(ClinicalSources):
-    """Keep the parsed public text for independent verification after ML-2."""
-
-    def __init__(self, cache: Path) -> None:
-        super().__init__(cache=cache)
-        self.loaded: list[Any] = []
-        self.fragment_count = 0
-
-    def load(self, candidate: Any) -> Any:
-        cached = super().load(candidate)
-        self.loaded.append(cached)
-        return cached
-
-    def snapshot(self, pair: AIInput, mnn: str | None) -> EvidenceSnapshot:
-        documents: dict[tuple[str, str, str], EvidenceDocument] = {}
-        for cached in self.loaded:
-            rec = cached.recommendation
-            for fragment in fragments_for_inn(rec, mnn or ""):
-                document = EvidenceDocument(
-                    source_id=fragment.source_id,
-                    fragment_id=fragment.fragment_id,
-                    title=fragment.title,
-                    version=fragment.version,
-                    url=fragment.url,
-                    copy_url=fragment.copy_url,
-                    location=fragment.location,
-                    text=fragment.text,
-                    diagnosis=pair.diagnosis,
-                    inn=mnn,
-                    retrieved_at=rec.retrieved_at,
-                )
-                documents[(fragment.source_id, fragment.fragment_id, fragment.version)] = document
-        self.fragment_count = len(documents)
-        digest = sha256(
-            "".join(d.model_dump_json() for d in documents.values()).encode()
-        ).hexdigest()
-        return EvidenceSnapshot(
-            snapshot_version="clinical-" + digest[:16], documents=list(documents.values())
-        )
+    return CapturedSources(cache)
 
 
 def create_provider(timeout: float) -> Any:
@@ -125,6 +130,16 @@ def analyze_pair(
     timeout: float,
     progress: Callable[..., None] | None = None,
 ) -> WorkerResult:
+    if settings.mode == "template":
+        return WorkerResult(check=local.model_dump(mode="json"))
+
+    from llm_rag.evidence_snapshot import verify_ml2_evidence
+    from llm_rag.explanation import explain_pair
+    from llm_rag.ml2.classifier import gigachat_completer
+    from llm_rag.ml2.pipeline import ML2Pipeline
+    from llm_rag.ml2.registry import RegistrySnapshot
+
+    PairOriginal, PairItem, PairRequest, PairExplanationInput = load_pair_contracts()
     diagnostics: dict[str, Any] = {"pipeline": "ml2", "live_sources": settings.live_sources}
 
     def failure(message: str) -> WorkerResult:
@@ -191,7 +206,7 @@ def analyze_pair(
             )
         ],
     )
-    sources = CapturedSources(cache)
+    sources = create_sources(cache)
     provider: Any = None
     fields: set[str] = set()
     tokens = 0

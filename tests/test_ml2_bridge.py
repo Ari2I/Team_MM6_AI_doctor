@@ -21,7 +21,10 @@ from scripts.rag_check import test_file as make_test_file
 from tests.test_ai_analysis import MemorySession
 
 AI_SOURCE = Path("ai/src").resolve()
-pytestmark = pytest.mark.skipif(not AI_SOURCE.is_dir(), reason="AI library is absent")
+pytestmark = [
+    pytest.mark.skipif(not AI_SOURCE.is_dir(), reason="AI library is absent"),
+    pytest.mark.usefixtures("no_network"),
+]
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +33,7 @@ def library_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_missing_registry_returns_clear_review(tmp_path: Path) -> None:
-    settings = AISettings(mode="template", registry_path=str(tmp_path / "missing.json"))
+    settings = AISettings(mode="offline", registry_path=str(tmp_path / "missing.json"))
     adapter = AIAdapter(settings)
     check = adapter.analyze(AIInput(drug_name="Препарат", diagnosis="J45.9"), PairCheck())
     assert check.needs_review and check.category is None
@@ -41,7 +44,7 @@ def test_missing_registry_returns_clear_review(tmp_path: Path) -> None:
 def test_corrupt_registry_is_safe_review(tmp_path: Path) -> None:
     path = tmp_path / "registry.json"
     path.write_text("invalid", encoding="utf-8")
-    adapter = AIAdapter(AISettings(mode="template", registry_path=str(path)))
+    adapter = AIAdapter(AISettings(mode="offline", registry_path=str(path)))
     check = adapter.analyze(AIInput(drug_name="Препарат", diagnosis="J45.9"), PairCheck())
     assert check.needs_review and "неверный формат" in check.comment
     assert adapter.last_diagnostics["data_error"] == "REGISTRY_INVALID"
@@ -51,8 +54,9 @@ def test_pair_contract_keeps_missing_purchase_fields_and_real_provenance() -> No
     from llm_rag.ml2.pipeline import ML2Pipeline
     from llm_rag.ml2.registry import RegistrySnapshot
 
-    from app.services.ml2_analysis import PairItem, PairOriginal, PairRequest
+    from app.services.ml2_analysis import load_pair_contracts
 
+    PairOriginal, PairItem, PairRequest, _ = load_pair_contracts()
     request = PairRequest(
         schema_version="1.0",
         request_id="pair",
@@ -97,7 +101,7 @@ def test_real_reference_to_worker_without_purchase_fields(real_paths: tuple[Path
     registry, cache = real_paths
     adapter = AIAdapter(
         AISettings(
-            mode="template",
+            mode="offline",
             registry_path=str(registry),
             clinical_cache_dir=str(cache),
             live_sources=True,
@@ -122,7 +126,7 @@ def test_live_sources_flag_controls_clinical_lookup(real_paths: tuple[Path, Path
     result = execute(
         {
             "settings": AISettings(
-                mode="template",
+                mode="offline",
                 registry_path=str(registry),
                 clinical_cache_dir=str(cache),
                 live_sources=False,
@@ -164,7 +168,7 @@ def test_real_xlsx_analysis_report_with_memory_storage(
     session.scalar = lambda _: None
     adapter = AIAdapter(
         AISettings(
-            mode="template",
+            mode="offline",
             registry_path=str(registry),
             clinical_cache_dir=str(cache),
             live_sources=True,

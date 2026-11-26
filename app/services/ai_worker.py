@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 import os
+import socket
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -84,7 +85,9 @@ class AllowlistedProvider:
 
 
 def _deny_network(event: str, args: tuple[Any, ...]) -> None:
-    if event in {"socket.connect", "socket.getaddrinfo", "socket.sendto"}:
+    if event in {"socket.connect", "socket.getaddrinfo", "socket.sendto"} or (
+        event == "socket.__new__" and args[1] in {socket.AF_INET, socket.AF_INET6}
+    ):
         raise PermissionError("Offline mode")
 
 
@@ -96,6 +99,8 @@ def run_module(
     progress: Callable[..., None] | None = None,
 ) -> WorkerResult:
     """Ленивые импорты; template сюда не приходит и пакета не требует."""
+    if settings.mode == "template":
+        return WorkerResult(check=local.model_dump(mode="json"))
     if settings.registry_path or settings.clinical_cache_dir or settings.live_sources:
         source = Path(__file__).resolve().parents[2] / "ai" / "src"
         if source.is_dir():
@@ -271,9 +276,7 @@ def execute(
 ) -> WorkerResult:
     try:
         settings = AISettings.model_validate(data["settings"])
-        if guard_network and settings.mode == "offline":
-            sys.addaudithook(_deny_network)
-        elif guard_network and settings.mode == "template" and not settings.live_sources:
+        if guard_network and settings.mode in {"template", "offline"}:
             sys.addaudithook(_deny_network)
         return run_module(
             AIInput.model_validate(data["pair"]),

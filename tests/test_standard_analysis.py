@@ -18,6 +18,8 @@ from app.services import analysis, standard_analysis
 from app.services.ai_adapter import AIAdapter, AIInput
 from tests.test_ai_analysis import MemorySession
 
+pytestmark = pytest.mark.usefixtures("no_network")
+
 
 def known_pair() -> AIInput:
     return AIInput(
