@@ -22,10 +22,12 @@ def no_network(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None
     marker = tmp_path / "worker-network-attempt"
 
     def guarded_run(command: Any, *args: Any, **kwargs: Any) -> Any:
-        if isinstance(command, list | tuple) and list(command[1:]) == [
-            "-m",
-            "app.services.ai_worker",
-        ]:
+        if (
+            isinstance(command, list | tuple)
+            and len(command) == 3
+            and command[1] == "-m"
+            and command[2] in {"app.services.ai_worker", "app.services.integration_worker"}
+        ):
             bootstrap = f"""
 import sys
 from pathlib import Path
@@ -35,7 +37,7 @@ def forbid(event, args):
         raise PermissionError('network forbidden by test')
 sys.addaudithook(forbid)
 import runpy
-runpy.run_module('app.services.ai_worker', run_name='__main__')
+runpy.run_module({command[2]!r}, run_name='__main__')
 """
             command = [command[0], "-c", bootstrap]
         return original_run(command, *args, **kwargs)
