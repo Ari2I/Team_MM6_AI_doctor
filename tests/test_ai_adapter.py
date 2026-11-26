@@ -111,7 +111,8 @@ def fake_module(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             normalize=lambda text: text.casefold().strip(),
         ),
         "llm_rag.pipeline": SimpleNamespace(Pipeline=Pipeline),
-        "llm_rag.providers.demo": SimpleNamespace(DemoProvider=lambda: object()),
+        "llm_rag.providers.template": SimpleNamespace(TemplateProvider=SimpleNamespace),
+        "llm_rag.network_policy": SimpleNamespace(NetworkPolicy=SimpleNamespace),
     }
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)

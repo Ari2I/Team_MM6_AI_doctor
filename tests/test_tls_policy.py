@@ -50,6 +50,9 @@ def test_network_factory_always_enables_tls(
     module = "llm_rag.providers.gigachat" if factory == "standard" else "llm_rag.ml2.provider"
     symbol = "GigaChatProvider" if factory == "standard" else "ML2GigaChatProvider"
     monkeypatch.setitem(sys.modules, module, SimpleNamespace(**{symbol: Provider}))
+    monkeypatch.setitem(
+        sys.modules, "llm_rag.network_policy", SimpleNamespace(NetworkPolicy=SimpleNamespace)
+    )
     monkeypatch.setattr(
         service,
         "AINetworkSettings",

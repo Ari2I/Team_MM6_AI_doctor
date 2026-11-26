@@ -25,6 +25,7 @@ def create_provider(timeout: float) -> LLMProvider:
     source = Path(__file__).resolve().parents[2] / "ai" / "src"
     if source.is_dir():
         sys.path.insert(0, str(source))
+    from llm_rag.network_policy import NetworkPolicy
     from llm_rag.providers.gigachat import GigaChatProvider
 
     credentials = AINetworkSettings()
@@ -35,6 +36,7 @@ def create_provider(timeout: float) -> LLMProvider:
         ca_bundle=credentials.ca_bundle_file or None,
         scope=credentials.scope or "GIGACHAT_API_PERS",
         timeout=timeout,
+        network_policy=NetworkPolicy(),
     )
 
 
@@ -73,7 +75,6 @@ def analyze_pair(
     claim = {"claim_id": "rule", "text": statement, "fragment_id": "rule", "quote": statement}
     payload = {
         "schema_version": "1.0",
-        "is_demo": False,
         "corpus_version": local.reference_version,
         "item": {
             "item_id": "item",

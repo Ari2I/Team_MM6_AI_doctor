@@ -114,7 +114,7 @@ def test_network_receives_only_rule_and_pair(monkeypatch: pytest.MonkeyPatch, ta
     )
     result = standard_analysis.analyze_pair(pair, known_rule(), AISettings(mode="network"), 5)
     assert state.closed and result.tokens == 17
-    assert state.payload["is_demo"] is False
+    assert "is_demo" not in state.payload
     assert "private" not in json.dumps(state.payload)
     assert set(state.payload["item"]) == {"item_id", "inn", "diagnosis", "category"}
     if tamper:

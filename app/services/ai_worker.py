@@ -46,7 +46,6 @@ def network_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Unsupported evidence")
     return {
         "schema_version": "1.0",
-        "is_demo": payload.get("is_demo", False),
         "corpus_version": payload["corpus_version"],
         "item": {key: payload["item"][key] for key in NETWORK_ITEM_FIELDS},
         "evidence": [{key: entry[key] for key in EVIDENCE_FIELDS} for entry in payload["evidence"]],
@@ -55,7 +54,7 @@ def network_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def sent_field_names(payload: dict[str, Any]) -> list[str]:
     return sorted(
-        ["schema_version", "is_demo", "corpus_version"]
+        ["schema_version", "corpus_version"]
         + [f"item.{key}" for key in payload["item"]]
         + [f"evidence[].{key}" for key in EVIDENCE_FIELDS]
     )
@@ -119,8 +118,9 @@ def run_module(
         sys.path.insert(0, str(source))
     from llm_rag.contracts import AnalysisRequest, AnalysisResult
     from llm_rag.corpus import Corpus, normalize
+    from llm_rag.network_policy import NetworkPolicy
     from llm_rag.pipeline import Pipeline
-    from llm_rag.providers.demo import DemoProvider
+    from llm_rag.providers.template import TemplateProvider
 
     corpus = Corpus.model_validate_json(Path(settings.corpus_path).read_text(encoding="utf-8"))
     candidates = [
@@ -142,7 +142,6 @@ def run_module(
         {
             "schema_version": "1.0",
             "request_id": "pair",
-            "is_demo": True,
             "diagnosis": pair.diagnosis,
             "items": [
                 {
@@ -165,7 +164,8 @@ def run_module(
             ],
         }
     )
-    provider: Any = DemoProvider()
+    provider: Any = TemplateProvider()
+    provider.network_policy = NetworkPolicy()
     network: Any = None
     try:
         if settings.mode == "network":
@@ -180,6 +180,7 @@ def run_module(
                     timeout=timeout,
                     scope=credentials.scope or "GIGACHAT_API_PERS",
                     ca_bundle=credentials.ca_bundle_file or None,
+                    network_policy=NetworkPolicy(),
                 )
             except Exception:
                 return WorkerResult(error=ReviewReason.AI_UNAVAILABLE.value)
