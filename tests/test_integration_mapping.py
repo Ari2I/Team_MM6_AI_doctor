@@ -111,21 +111,45 @@ def test_no_row_diagnosis_means_all_application_diagnoses(
     assert len(payload["links"]) == 4 and len(payload["purchases"]) == 2
 
 
-@pytest.mark.parametrize("group", ["adult", "child"])
+@pytest.mark.parametrize("group", [None, "adult", "child"])
 def test_age_group_is_retained_and_cannot_be_silently_dropped(
     application: Application,
-    group: str,
+    group: str | None,
 ) -> None:
     application.age_group = group
     prepared = prepare_integration_request(application, currency="RUB")
     assert prepared.age_group == group
     assert "age_years" not in json.dumps(prepared.payload)
-    assert "age_group" not in json.dumps(prepared.payload)
-    with pytest.raises(IntegrationMappingError) as caught:
-        validate_integration_request(prepared)
-    assert caught.value.column == "age_group"
-    assert caught.value.review_reason == "AI_UNAVAILABLE"
+    assert all(
+        diagnosis.get("conditions", {}).get("age_group") == group
+        for diagnosis in prepared.payload["diagnoses"]
+    )
     assert application.age_group == group
+
+
+@pytest.mark.parametrize("group", [None, "adult", "child"])
+def test_public_request_keeps_group_without_inventing_exact_age(
+    application: Application, library_path: None, group: str | None
+) -> None:
+    application.age_group = group
+    prepared = prepare_integration_request(application, currency="RUB")
+    payload = validate_integration_request(prepared)
+    assert all(
+        diagnosis["conditions"]["age_group"] == group
+        and diagnosis["conditions"]["age_years"] is None
+        for diagnosis in payload["diagnoses"]
+    )
+    assert prepared.payload == prepare_integration_request(application, currency="RUB").payload
+
+
+@pytest.mark.parametrize("group", ["Adult", "unknown", "Взрослые"])
+def test_invalid_age_group_is_not_guessed(application: Application, group: str) -> None:
+    application.age_group = group
+    with pytest.raises(IntegrationMappingError) as caught:
+        prepare_integration_request(application, currency="RUB")
+    assert caught.value.column == "age_group"
+    assert caught.value.review_reason == "AI_INPUT_INCOMPLETE"
+    assert group not in str(caught.value)
 
 
 @pytest.mark.parametrize(

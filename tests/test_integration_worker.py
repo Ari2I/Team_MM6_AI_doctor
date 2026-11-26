@@ -118,6 +118,7 @@ def test_client_accepts_valid_result_and_keeps_input(
         "both_outcomes",
         "missing_result",
         "wrong_result_request",
+        "changed_age_group",
         "bad_result",
     ],
 )
@@ -152,6 +153,8 @@ def test_client_rejects_invalid_protocol(
         other = make_application()
         other.id = uuid4()
         data["result"] = integration_result(other)
+    elif damage == "changed_age_group":
+        data["result"]["request"]["diagnoses"][0]["conditions"]["age_group"] = "child"
     elif damage == "bad_result":
         data["result"]["human_report"]["title"] = "PRIVATE-WORKER-MARKER"
     output = json.dumps(data)
@@ -221,16 +224,49 @@ def test_subprocess_errors_do_not_publish_output(
     assert captured.out == captured.err == ""
 
 
-def test_pending_age_group_never_starts_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("group", ["adult", "child"])
+def test_age_group_survives_client_worker_roundtrip(
+    group: str, library_path: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     application = make_application()
-    application.age_group = "adult"
+    application.age_group = group
+    expected = integration_result(application)
+    calls = []
 
-    def forbidden(*args, **kwargs):
-        pytest.fail("Неподдерживаемая группа отправлена worker.")
+    def facade(payload, budget):
+        calls.append(payload)
+        assert all(
+            diagnosis["conditions"]["age_group"] == group
+            and diagnosis["conditions"]["age_years"] is None
+            for diagnosis in payload["diagnoses"]
+        )
+        return expected
 
-    monkeypatch.setattr(integration_client.subprocess, "run", forbidden)
+    def run(command, **kwargs):
+        sent = IntegrationTask.model_validate_json(kwargs["input"])
+        response = integration_worker.execute(sent)
+        return SimpleNamespace(stdout=response.model_dump_json())
+
+    monkeypatch.setattr(integration_worker, "run_request", facade)
+    monkeypatch.setattr(integration_client.subprocess, "run", run)
     reply = worker_client().analyze(prepare_integration_request(application, currency="RUB"))
-    assert reply.error == "AI_UNAVAILABLE"
+    assert reply.outcome == "result" and reply.result == expected
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("group", ["adult", "child"])
+def test_client_rejects_result_that_dropped_age_group(
+    group: str, library_path: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    application = make_application()
+    result_without_group = integration_result(application)
+    application.age_group = group
+    fake_process(
+        monkeypatch,
+        IntegrationReply(request_id=application.id, outcome="result", result=result_without_group),
+    )
+    reply = worker_client().analyze(prepare_integration_request(application, currency="RUB"))
+    assert reply.error == "AI_INVALID_RESPONSE" and reply.result is None
 
 
 def test_no_budget_does_not_start_process(

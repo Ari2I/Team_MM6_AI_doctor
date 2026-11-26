@@ -97,20 +97,29 @@ def save(session: Session, application: Application, mode: str = "complete") -> 
 
 
 @pytest.mark.parametrize("mode", ["complete", "partial", "fallback", "evidence"])
+@pytest.mark.parametrize("group", [None, "adult", "child"])
 def test_jsonb_and_http_roundtrip(
     session: Session,
     application: Application,
     library_path: None,
     mode: str,
+    group: str | None,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    application.age_group = group
+    session.flush()
     stored = save(session, application, mode)
     expected = deepcopy(stored.result)
     session.commit()
     session.expire_all()
     loaded = session.get(ApplicationAIResult, application.id)
     assert loaded.result == expected
+    assert all(
+        diagnosis["conditions"]["age_group"] == group
+        and diagnosis["conditions"]["age_years"] is None
+        for diagnosis in loaded.result["request"]["diagnoses"]
+    )
     report = read_ai_report(loaded)
     assert report.human_report.model_dump(mode="json") == expected["human_report"]
     if mode == "evidence":
@@ -217,7 +226,7 @@ def test_replace_rollback_and_cascade(
     assert session.get(ApplicationAIResult, identifier) is None
 
 
-@pytest.mark.parametrize("damage", ["application_id", "purchase", "links"])
+@pytest.mark.parametrize("damage", ["application_id", "purchase", "links", "age_group"])
 def test_other_or_changed_request_is_rejected(
     session: Session,
     application: Application,
@@ -229,6 +238,8 @@ def test_other_or_changed_request_is_rejected(
         other.id = uuid4()
     elif damage == "purchase":
         other.items[0].amount = other.items[0].amount + 1
+    elif damage == "age_group":
+        other.age_group = "adult"
     else:
         other.items[0].diagnosis = None
     result = integration_result(other)

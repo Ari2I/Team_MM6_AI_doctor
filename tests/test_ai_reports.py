@@ -6,13 +6,15 @@ import sys
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
+from sqlalchemy.orm import Session
 
 from app.models import ApplicationAIResult
 from app.schemas.analysis import ReferenceSnapshot
-from app.services.ai_reports import AIReportError, read_ai_report, result_checks
+from app.services.ai_reports import AIReportError, read_ai_report, result_checks, save_ai_result
 from tests.ai_report_data import human_report, integration_result
 from tests.test_integration_mapping import make_application
 
@@ -139,6 +141,62 @@ def test_result_rows_follow_explicit_ids(mode: str, library_path: None) -> None:
     if mode == "fallback":
         assert all(c.generation_mode == "FALLBACK" for c in checks)
     assert result == before
+
+
+@pytest.mark.parametrize("group", [None, "adult", "child"])
+def test_save_keeps_group_and_read_works_without_ai(
+    group: str | None, library_path: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import analysis
+
+    application = make_application()
+    application.age_group = group
+    result = integration_result(application)
+    session = Mock(spec=Session)
+    session.scalar.return_value = application
+    session.get.return_value = None
+    monkeypatch.setattr(
+        analysis, "_load_snapshot", lambda _: ReferenceSnapshot(reference_version="unconfigured")
+    )
+    stored = save_ai_result(
+        session,
+        application.id,
+        result,
+        currency="RUB",
+        backend_revision="a" * 40,
+        ai_revision="b" * 40,
+    )
+    assert all(
+        diagnosis["conditions"]["age_group"] == group
+        and diagnosis["conditions"]["age_years"] is None
+        for diagnosis in stored.result["request"]["diagnoses"]
+    )
+    session.add.assert_called_once_with(stored)
+    session.flush.assert_called_once()
+    monkeypatch.setitem(sys.modules, "llm_rag", None)
+    monkeypatch.setitem(sys.modules, "gigachat", None)
+    assert read_ai_report(stored).human_report.model_dump(mode="json") == result["human_report"]
+
+
+@pytest.mark.parametrize("group", [None, "adult", "child"])
+def test_save_rejects_changed_age_group(group: str | None, library_path: None) -> None:
+    application = make_application()
+    application.age_group = group
+    result = integration_result(application)
+    application.age_group = "child" if group == "adult" else "adult"
+    session = Mock(spec=Session)
+    session.scalar.return_value = application
+    with pytest.raises(AIReportError):
+        save_ai_result(
+            session,
+            application.id,
+            result,
+            currency="RUB",
+            backend_revision="a" * 40,
+            ai_revision="b" * 40,
+        )
+    session.add.assert_not_called()
+    session.flush.assert_not_called()
 
 
 def test_http_errors_without_database() -> None:

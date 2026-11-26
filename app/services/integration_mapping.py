@@ -38,9 +38,9 @@ class IntegrationMappingError(ValueError):
 class PreparedIntegrationRequest:
     """Локальный результат подготовки, не новый API-контракт.
 
-    payload соответствует общей части integration-request.1. age_group остаётся
-    отдельно до согласования публичного поля библиотеки; валидация для worker
-    запрещает её молчаливую потерю. Объект не предназначен для логирования.
+    payload соответствует integration-request.1, включая известную age_group
+    в conditions каждого диагноза. Точный возраст из группы не выводится.
+    Объект не предназначен для логирования.
     """
 
     payload: dict[str, Any]
@@ -85,7 +85,7 @@ def prepare_integration_request(
     if age_group not in {None, "adult", "child"}:
         raise IntegrationMappingError("age_group")
 
-    diagnoses: list[dict[str, str]] = []
+    diagnoses: list[dict[str, Any]] = []
     diagnosis_ids: set[str] = set()
     diagnosis_by_name: dict[str, str] = {}
     for diagnosis in application.diagnoses:
@@ -95,7 +95,9 @@ def prepare_integration_request(
             raise IntegrationMappingError("diagnosis")
         diagnosis_ids.add(identifier)
         diagnosis_by_name[name] = identifier
-        value = {"diagnosis_id": identifier, "name": name}
+        value: dict[str, Any] = {"diagnosis_id": identifier, "name": name}
+        if age_group is not None:
+            value["conditions"] = {"age_group": age_group}
         if match := _ICD_PREFIX.match(name):
             value["icd10"] = match[1].upper()
         diagnoses.append(value)
@@ -148,9 +150,6 @@ def prepare_integration_request(
 
 def validate_integration_request(prepared: PreparedIntegrationRequest) -> dict[str, Any]:
     """Проверить публичной моделью перед будущей передачей worker; сеть не вызывается."""
-    if prepared.age_group is not None:
-        # TODO: согласовать публичное поле age_group с владельцем AI-библиотеки.
-        raise IntegrationMappingError("age_group", review_reason=ReviewReason.AI_UNAVAILABLE)
     try:
         from llm_rag.integration_contracts import IntegrationRequest
     except ImportError:
