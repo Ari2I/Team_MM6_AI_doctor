@@ -100,6 +100,46 @@ def test_model_classification_and_staff_share_budget_and_close_client():
     assert result.human_report["items"][0]["questions"]
 
 
+@pytest.mark.parametrize("reported_usage", [31, None])
+def test_two_pairs_reuse_completed_reservations_only_with_current_api_usage(reported_usage):
+    from llm_rag.integration import _run, IntegrationOptions
+    from llm_rag.integration_contracts import IntegrationLink
+
+    class MeteredClient(FakeClient):
+        def complete_json(self, *args):
+            response = super().complete_json(*args)
+            self.last_total_tokens = reported_usage
+            return response
+
+        def generate(self, payload):
+            response = super().generate(payload)
+            self.last_total_tokens = reported_usage
+            return response
+
+    value = model_request()
+    second = value.diagnoses[0].model_copy(deep=True, update={"diagnosis_id": "D1"})
+    value.diagnoses[0].conditions.age_years = "24"
+    second.conditions.age_years = "32"
+    value.diagnoses.append(second)
+    value.purchases.append(value.purchases[0].model_copy(update={"item_id": "Q"}))
+    value.links.append(IntegrationLink(item_id="Q", diagnosis_id="D1"))
+    client = MeteredClient()
+    result = _run(value, resources=resources(client), options=IntegrationOptions(max_tokens=18000))
+
+    if reported_usage is None:
+        assert result.completeness == "PARTIAL"
+        assert result.unprocessed_pairs[0].reason == "BUDGET_EXHAUSTED"
+        assert result.usage.token_accounting == "UPPER_BOUND"
+    else:
+        assert result.completeness == "COMPLETE"
+        assert not result.unprocessed_pairs
+        assert len(result.pairs) == 2
+        assert all(pair.generation_mode == "MODEL" for pair in result.pairs)
+        assert all(pair.decision.proposed_category == "Б" for pair in result.pairs)
+        assert result.usage.calls == client.calls == 4
+        assert result.usage.tokens == 124 and result.usage.token_accounting == "ACTUAL"
+
+
 def test_public_recommendation_respects_local_age_and_requires_clinical_review():
     from dataclasses import replace
     from decimal import Decimal

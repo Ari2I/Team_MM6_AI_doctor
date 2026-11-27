@@ -79,6 +79,7 @@ class GigaChatProvider:
         self.scope = scope
         self.verify_ssl_certs = verify_ssl_certs
         self._max_output_tokens = None
+        self.last_total_tokens = None
         self.api_calls = 0
         self.last_diagnostic = None
         self._model = model
@@ -130,6 +131,7 @@ class GigaChatProvider:
 
     def generate(self, payload: dict) -> dict:
         started = perf_counter()
+        self.last_total_tokens = None
         self.last_diagnostic = None
         self._diagnostic_stage = 'request_preparation'
         try:
@@ -200,6 +202,9 @@ class GigaChatProvider:
                     value = getattr(response.usage, key, None)
                     if isinstance(value, int) and value >= 0:
                         self.usage_totals[key] += value
+                total = getattr(response.usage, "total_tokens", None)
+                if type(total) is int and total >= 0:
+                    self.last_total_tokens = total
             if len(response.choices) != 1:
                 raise ProviderError("GIGACHAT_INVALID_COMPLETION")
             choice = response.choices[0]

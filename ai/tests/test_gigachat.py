@@ -127,6 +127,36 @@ def test_sdk_client_is_reused_across_items_and_refreshes_expired_token(sdk_wire)
     assert len([r for r in sdk_wire.requests if r.url.path == "/api/v2/oauth"]) == 2
 
 
+def test_generation_usage_is_per_call_and_missing_usage_never_reuses_previous_receipt(sdk_wire, monkeypatch):
+    raw, _, _, _, payload = generate()
+    original_chat = GigaChat.chat
+    seen = []
+
+    def chat(client, request):
+        response = original_chat(client, request)
+        if seen:
+            # SDK 0.2.0 requires usage in the wire schema; the provider still
+            # must conservatively handle an adapter without a usage receipt.
+            response.usage = None
+        seen.append(True)
+        return response
+
+    monkeypatch.setattr(GigaChat, "chat", chat)
+
+    def handler(request):
+        if request.url.path == "/api/v2/oauth":
+            return httpx.Response(200, json={"access_token": "test-access", "expires_at": (NOW + 1800) * 1000})
+        return httpx.Response(200, json=completion(raw))
+
+    sdk_wire.handler = handler
+    with make_provider() as provider:
+        provider.generate(payload)
+        assert provider.last_total_tokens == 140
+        provider.generate(payload)
+        assert provider.last_total_tokens is None
+        assert provider.usage_totals["total_tokens"] == 140
+
+
 def test_access_token_mode_and_grounding_validation(sdk_wire):
     from llm_rag.pipeline import Pipeline
     from llm_rag.providers.gigachat import GigaChatProvider

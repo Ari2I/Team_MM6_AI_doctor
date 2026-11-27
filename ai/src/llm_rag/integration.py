@@ -248,9 +248,9 @@ def _analyze_request(
                 return deepcopy(classification_cache[cache_key])
             # Верхняя оценка учитывает текст, JSON schema, инструкции и выход.
             reserved = 3 * len(user.encode()) + len(system.encode()) + 4096
-            remaining = budget.reserve(reserved)
-            with provider.request_limits(timeout=remaining, max_tokens=2048):
-                response = invoke(system, user)
+            with budget.attempt(reserved, usage=lambda: getattr(provider, "last_total_tokens", None)) as remaining:
+                with provider.request_limits(timeout=remaining, max_tokens=2048):
+                    response = invoke(system, user)
             classification_cache[cache_key] = deepcopy(response)
             return response
 
@@ -512,9 +512,10 @@ def _analyze_request(
                 if cache_key in staff_cache:
                     cache_stats["hits"] += 1
                     return restore(deepcopy(staff_cache[cache_key]))
-                remaining = budget.reserve(3 * len(json.dumps(safe, ensure_ascii=False).encode()) + 8192)
-                with provider.request_limits(timeout=remaining, max_tokens=1500):
-                    response = provider.generate(safe)
+                reserved = 3 * len(json.dumps(safe, ensure_ascii=False).encode()) + 8192
+                with budget.attempt(reserved, usage=lambda: getattr(provider, "last_total_tokens", None)) as remaining:
+                    with provider.request_limits(timeout=remaining, max_tokens=1500):
+                        response = provider.generate(safe)
                 staff_cache[cache_key] = deepcopy(response)
                 return restore(response)
 
@@ -553,7 +554,7 @@ def _analyze_request(
             calls=budget.calls,
             cache_hits=cache_stats["hits"],
             tokens=budget.tokens,
-            token_accounting="UPPER_BOUND" if budget.calls else "ACTUAL",
+            token_accounting=budget.token_accounting,
             elapsed_seconds=float(resources.clock() - start),
         ),
         human_report=report,

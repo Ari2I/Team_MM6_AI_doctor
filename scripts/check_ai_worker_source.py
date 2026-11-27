@@ -11,6 +11,9 @@ from pathlib import Path
 ROOT = Path.cwd() if __file__ == "<stdin>" else Path(__file__).resolve().parents[1]
 SOURCE_FILES = (
     "integration.py",
+    "integration_budget.py",
+    "providers/gigachat.py",
+    "ml2/provider.py",
     "runtime.py",
     "embeddings.py",
     "integration_contracts.py",
