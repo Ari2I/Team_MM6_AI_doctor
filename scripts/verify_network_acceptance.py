@@ -14,6 +14,9 @@ from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from scripts.network_case_checks import full_inn_pattern, normalize_public_text  # noqa: E402
+
 DATA = Path("/var/lib/vrach/rag")
 FOLDER = DATA / "acceptance"
 INDEX = DATA / "indexes/official-embeddings.json"
@@ -69,6 +72,20 @@ def assess(result: dict, *, new_vectors: set[str]) -> None:
         raise ValueError("NO_MODEL_CALLS")
     if not pair["citations"] or not (result.get("evidence_snapshot") or {}).get("documents"):
         raise ValueError("NO_SAVED_EVIDENCE")
+    # Критерий относится только к одной синтетической контрольной паре.
+    # Ссылки и наличие цитаты сами по себе не связывают её с проверяемым МНН.
+    pattern = full_inn_pattern(pair.get("inn"))
+    if pattern is None or any(
+        normalize_public_text(document["inn"]) != normalize_public_text(pair["inn"])
+        or not pattern.search(normalize_public_text(document["text"]))
+        for document in result["evidence_snapshot"]["documents"]
+    ):
+        raise ValueError("UNRELATED_CONTROL_EVIDENCE")
+    if any(
+        not pattern.search(normalize_public_text(citation["quote"]))
+        for citation in pair["citations"]
+    ):
+        raise ValueError("UNRELATED_CONTROL_CITATION")
     info = result.get("retrieval_info") or {}
     if (
         info.get("method") != "vector"

@@ -16,6 +16,7 @@ from openpyxl import Workbook
 from scripts import prepare_network_case as prepare
 from scripts import run_network_acceptance as run
 from scripts import verify_network_acceptance as verify
+from scripts.network_case_checks import full_inn_pattern, normalize_public_text
 from tests.ai_report_data import human_report
 
 pytestmark = pytest.mark.usefixtures("no_network")
@@ -32,7 +33,7 @@ def control_result():
     document = dict(
         inn="Синтетическое вещество",
         diagnosis="Синтетический диагноз",
-        text="Синтетический фрагмент",
+        text="Синтетическое вещество упоминается в публичном фрагменте.",
     )
     prefix = f"МНН: {document['inn']}. Диагноз: {document['diagnosis']}."
     key = sha256(prefix.encode()).hexdigest()
@@ -41,7 +42,11 @@ def control_result():
         unprocessed_pairs=[],
         pairs=[
             dict(
-                generation_mode="MODEL", staff_analysis={}, citations=[{}], reasons=["NEEDS_REVIEW"]
+                inn=document["inn"],
+                generation_mode="MODEL",
+                staff_analysis={},
+                citations=[dict(quote=document["text"])],
+                reasons=["NEEDS_REVIEW"],
             )
         ],
         evidence_snapshot=dict(documents=[document]),
@@ -52,11 +57,100 @@ def control_result():
     return value, {key}
 
 
+@pytest.mark.parametrize(
+    ("inn", "text", "matches"),
+    [
+        pytest.param("Вещество альфа", "Вещество альфа** упомянуто.", True, id="full-name"),
+        pytest.param("Вещество альфа", "(ВЕЩЕСТВО\u00a0альфа).", True, id="case-and-space"),
+        pytest.param("Вещество альфа", "Вещество\n  альфа.", True, id="line-wrap"),
+        pytest.param("Вёщество альфа", "Вещество альфа.", True, id="yo"),
+        pytest.param("Вещество альфа", "Другое альфа.", False, id="shared-token"),
+        pytest.param("Вещество альфа", "Вещество упомянуто.", False, id="missing-second-word"),
+        pytest.param("Вещество альфа", "Альфа вещество.", False, id="word-order"),
+        pytest.param("Вещество альфа", "Вещество, альфа.", False, id="separate-terms"),
+        pytest.param("Вещество", "Сверхвещество.", False, id="prefix"),
+        pytest.param("Вещество", "Веществом.", False, id="inflection"),
+        pytest.param("Вещество", "Вещество-альфа.", False, id="compound-suffix"),
+        pytest.param("Вещество", "Другое-вещество.", False, id="compound-prefix"),
+        pytest.param("Вещество альфа", "Вeщество альфа.", False, id="latin-lookalike"),
+        pytest.param("", "Любой текст.", False, id="empty"),
+        pytest.param(" \n", "Любой текст.", False, id="whitespace"),
+    ],
+)
+def test_control_requires_full_inn(inn, text, matches):
+    pattern = full_inn_pattern(inn)
+    assert bool(pattern and pattern.search(normalize_public_text(text))) is matches
+
+
+def test_selection_skips_shared_token_before_loading_fragments():
+    wrong = SimpleNamespace(mnn="Авещество альфа", form="Форма", trade_name="Первый")
+    correct = SimpleNamespace(mnn="Бвещество альфа", form="Форма", trade_name="Второй")
+    text = "Бвещество альфа приведено в публичном тексте."
+    recommendation = SimpleNamespace(segments=[SimpleNamespace(text=text)])
+    loaded = []
+
+    def fragments(rec, inn, **kwargs):
+        loaded.append(inn)
+        assert rec is recommendation
+        return [SimpleNamespace(text=text)]
+
+    entries = {entry.trade_name: entry for entry in (wrong, correct)}
+    index = SimpleNamespace(resolve=lambda name, form: entries[name])
+    selected = prepare.select_control_entry(
+        [wrong, correct], recommendation=recommendation, index=index, load_fragments=fragments
+    )
+    assert selected is correct and loaded == [correct.mnn]
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["no-fragments", "wrong-fragment", "long-fragment", "ambiguous-registry", "split-name"],
+)
+def test_selection_rejects_unlinked_control(damage):
+    entry = SimpleNamespace(mnn="Вещество альфа", form="Форма", trade_name="Препарат")
+    text = "Вещество альфа приведено в публичном тексте."
+    segments = [SimpleNamespace(text=text)]
+    fragments = [SimpleNamespace(text=text)]
+    resolved = entry
+    if damage == "no-fragments":
+        fragments = []
+    elif damage == "wrong-fragment":
+        fragments.append(SimpleNamespace(text="Другое альфа."))
+    elif damage == "long-fragment":
+        fragments = [SimpleNamespace(text=text + "я" * 1600)]
+    elif damage == "ambiguous-registry":
+        resolved = SimpleNamespace(mnn=None)
+    else:
+        segments = [SimpleNamespace(text="Вещество"), SimpleNamespace(text="альфа")]
+    with pytest.raises(ValueError, match="NO_CONTROL_PAIR"):
+        prepare.select_control_entry(
+            [entry],
+            recommendation=SimpleNamespace(segments=segments),
+            index=SimpleNamespace(resolve=lambda name, form: resolved),
+            load_fragments=lambda *args, **kwargs: fragments,
+        )
+
+
 def test_assessment_accepts_only_fresh_control_vectors():
     result, fresh = control_result()
     verify.assess(result, new_vectors=fresh)
     with pytest.raises(ValueError, match="NO_FRESH_CONTROL_VECTORS"):
         verify.assess(result, new_vectors={"unrelated"})
+
+
+@pytest.mark.parametrize("damage", ["wrong-inn", "wrong-document", "wrong-quote", "missing-inn"])
+def test_assessment_rejects_evidence_for_another_inn(damage):
+    result, fresh = control_result()
+    if damage == "wrong-inn":
+        result["evidence_snapshot"]["documents"][0]["inn"] = "Другое вещество"
+    elif damage == "wrong-document":
+        result["evidence_snapshot"]["documents"][0]["text"] = "Другое вещество."
+    elif damage == "wrong-quote":
+        result["pairs"][0]["citations"].append(dict(quote="Другое вещество."))
+    else:
+        result["pairs"][0]["inn"] = None
+    with pytest.raises(ValueError, match="UNRELATED_CONTROL_(EVIDENCE|CITATION)"):
+        verify.assess(result, new_vectors=fresh)
 
 
 @pytest.mark.parametrize(

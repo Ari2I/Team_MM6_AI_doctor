@@ -7,13 +7,19 @@ import json
 import logging
 import re
 import sys
+from collections.abc import Callable, Iterable, Sequence
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from scripts.network_case_checks import full_inn_pattern, normalize_public_text  # noqa: E402
+
 DATA = Path("/var/lib/vrach/rag")
 
 
@@ -70,6 +76,39 @@ def write_case(folder: Path, **values) -> None:
         staging.rename(folder)
 
 
+def select_control_entry(
+    registrations: Iterable[Any],
+    *,
+    recommendation: Any,
+    index: Any,
+    load_fragments: Callable[..., Sequence[Any]],
+) -> Any:
+    """Выбрать реестровую запись с полным МНН во всех предлагаемых фрагментах.
+
+    Это техническое совпадение текста, без назначения категории или вывода
+    о клинической применимости. Проверка не вызывает сеть и не импортирует AI.
+    """
+    unique = {}
+    for entry in registrations:
+        if entry.mnn and "+" not in entry.mnn and entry.form:
+            unique.setdefault(normalize_public_text(entry.mnn), entry)
+    segments = tuple(normalize_public_text(s.text) for s in recommendation.segments)
+    for entry in (unique[key] for key in sorted(unique)):
+        pattern = full_inn_pattern(entry.mnn)
+        if pattern is None or not any(pattern.search(text) for text in segments):
+            continue
+        fragments = load_fragments(recommendation, entry.mnn, max_fragments=8, window_chars=1600)
+        if not fragments or any(
+            len(fragment.text.encode("utf-8")) > 3000
+            or not pattern.search(normalize_public_text(fragment.text))
+            for fragment in fragments
+        ):
+            continue
+        if index.resolve(entry.trade_name, entry.form).mnn == entry.mnn:
+            return entry
+    raise ValueError("NO_CONTROL_PAIR")
+
+
 def prepare(code: str, group: str) -> None:
     if not re.fullmatch(r"[A-Z][0-9]{2}(?:\.[0-9]{1,4})?", code):
         raise ValueError
@@ -80,7 +119,7 @@ def prepare(code: str, group: str) -> None:
     from llm_rag.ml2.clinicalrecs import fragments_for_inn
     from llm_rag.ml2.grls import build_registry_snapshot, download_latest
     from llm_rag.ml2.official import ClinicalSources, select_edition
-    from llm_rag.ml2.registry import RegistryIndex, RegistrySnapshot, inn_key
+    from llm_rag.ml2.registry import RegistryIndex, RegistrySnapshot
 
     # Только подготовка публичных источников, не бюджет анализа заявки.
     deadline = monotonic() + 240
@@ -95,32 +134,20 @@ def prepare(code: str, group: str) -> None:
         build_registry_snapshot(archive, as_of, path)
     registry = RegistrySnapshot.load(path)
     index = RegistryIndex(registry)
-    unique = {}
-    for entry in registry.registrations:
-        if entry.mnn and "+" not in entry.mnn and entry.form:
-            unique.setdefault(inn_key(entry.mnn), entry)
-    # Никакая категория/медицинская применимость здесь не назначается.
-    # Подбирается только контролируемое техническое совпадение публичного текста.
-    public_text = " ".join(s.text.casefold().replace("ё", "е") for s in recommendation.segments)
-    for key, entry in sorted(unique.items()):
-        tokens = re.findall(r"[а-яa-z-]{4,}", key)
-        if not tokens or not any(token in public_text for token in tokens):
-            continue
-        fragments = fragments_for_inn(recommendation, entry.mnn, max_fragments=8, window_chars=1600)
-        if not fragments or any(len(f.text.encode()) > 3000 for f in fragments):
-            continue
-        if index.resolve(entry.trade_name, entry.form).mnn != entry.mnn:
-            continue
-        write_case(
-            folder,
-            code=code,
-            group=group,
-            recommendation=recommendation,
-            entry=entry,
-            registry_version=registry.version,
-        )
-        return
-    raise ValueError("NO_CONTROL_PAIR")
+    entry = select_control_entry(
+        registry.registrations,
+        recommendation=recommendation,
+        index=index,
+        load_fragments=fragments_for_inn,
+    )
+    write_case(
+        folder,
+        code=code,
+        group=group,
+        recommendation=recommendation,
+        entry=entry,
+        registry_version=registry.version,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
