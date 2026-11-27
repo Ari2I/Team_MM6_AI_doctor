@@ -52,7 +52,9 @@ def integration_result(application: Application, mode: str = "complete") -> dict
             url="https://example.org/synthetic-source",
             location="Тестовый раздел",
             text="Синтетическая цитата, не медицинская рекомендация.",
-            diagnosis=application.diagnoses[0].name,
+            diagnosis=next(
+                row.name for row in application.diagnoses if str(row.id) == pair["diagnosis_id"]
+            ),
             inn="Синтетическое вещество",
             retrieved_at=datetime.now(UTC).isoformat(),
         )

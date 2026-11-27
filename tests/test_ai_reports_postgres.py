@@ -51,6 +51,8 @@ def library_path(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def application(session: Session) -> Application:
     application = make_application()
+    item = next(row for row in application.items if row.row_number == 2)
+    diagnosis = next(row for row in application.diagnoses if row.name == item.diagnosis)
     application.filename = "synthetic.xlsx"
     application.status = "parsed"
     session.add(application)
@@ -61,11 +63,11 @@ def application(session: Session) -> Application:
             name="Синтетический справочник",
             description="Не клинические рекомендации.",
             is_synthetic=True,
-            drugs=[dict(trade_name=application.items[0].drug_name, mnn=application.items[0].mnn)],
-            diagnoses=[dict(diagnosis_id="d", name=application.diagnoses[0].name)],
+            drugs=[dict(trade_name=item.drug_name, mnn=item.mnn)],
+            diagnoses=[dict(diagnosis_id="d", name=diagnosis.name)],
             rules=[
                 dict(
-                    mnn=application.items[0].mnn,
+                    mnn=item.mnn,
                     diagnosis_id="d",
                     category="А",
                     source="Синтетическое backend-правило",
@@ -76,8 +78,8 @@ def application(session: Session) -> Application:
     import_reference(session, document, activate=True)
     session.add(
         ItemCheck(
-            item_id=application.items[0].id,
-            diagnosis_id=application.diagnoses[0].id,
+            item_id=item.id,
+            diagnosis_id=diagnosis.id,
             category="В",
             source="Синтетическое прежнее AI-предложение",
         )
@@ -123,15 +125,22 @@ def test_save_accepts_database_money_scale_without_changing_request(
 
 @pytest.mark.parametrize("mode", ["complete", "partial", "fallback", "evidence"])
 @pytest.mark.parametrize("group", [None, "adult", "child"])
+@pytest.mark.parametrize("reverse_loaded_order", [False, True])
 def test_jsonb_and_http_roundtrip(
     session: Session,
     application: Application,
     library_path: None,
     mode: str,
     group: str | None,
+    reverse_loaded_order: bool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # Порядок строк без ORDER BY не является идентичностью пары. Эти UUID
+    # сохраняем до expire_all и не выбираем заново через индекс коллекции.
+    item = next(row for row in application.items if row.row_number == 2)
+    item_id = item.id
+    diagnosis_id = next(row.id for row in application.diagnoses if row.name == item.diagnosis)
     application.age_group = group
     session.flush()
     stored = save(session, application, mode)
@@ -139,6 +148,9 @@ def test_jsonb_and_http_roundtrip(
     session.commit()
     session.expire_all()
     loaded = session.get(ApplicationAIResult, application.id)
+    if reverse_loaded_order:
+        application.items.reverse()
+        application.diagnoses.reverse()
     assert loaded.result == expected
     assert all(
         diagnosis["conditions"]["age_group"] == group
@@ -153,21 +165,21 @@ def test_jsonb_and_http_roundtrip(
             report.human_report.items[0].sources[0].quote
             == expected["pairs"][0]["citations"][0]["quote"]
         )
-    check = next(c for c in report.checks if c.item_id == application.items[0].id)
+    check = next(
+        c for c in report.checks if c.item_id == item_id and c.diagnosis_id == diagnosis_id
+    )
     assert check.backend_rule.category == "А"
     assert check.backend_rule.reference_version == "ai-report-synthetic-1"
     if mode == "complete":
         assert check.ai_proposed_category == "Б" and check.conflict
         assert check.form_status == "MISMATCH"
-    assert (
-        session.scalar(
-            select(ItemCheck).where(
-                ItemCheck.item_id == application.items[0].id,
-                ItemCheck.diagnosis_id == application.diagnoses[0].id,
-            )
-        ).category
-        == "В"
+    unchanged = session.scalar(
+        select(ItemCheck).where(
+            ItemCheck.item_id == item_id,
+            ItemCheck.diagnosis_id == diagnosis_id,
+        )
     )
+    assert unchanged is not None and unchanged.category == "В"
     assert application.status.value == "parsed"
 
     # Переключение справочника не изменяет сохранённый снимок SQL-оснований.

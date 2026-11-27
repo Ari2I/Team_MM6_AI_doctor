@@ -144,6 +144,25 @@ def test_result_rows_follow_explicit_ids(mode: str, library_path: None) -> None:
     assert result == before
 
 
+@pytest.mark.parametrize("reverse_items", [False, True])
+@pytest.mark.parametrize("reverse_diagnoses", [False, True])
+def test_evidence_keeps_pair_identity_when_collection_order_changes(
+    reverse_items: bool, reverse_diagnoses: bool, library_path: None
+) -> None:
+    application = make_application()
+    if reverse_items:
+        application.items.reverse()
+    if reverse_diagnoses:
+        application.diagnoses.reverse()
+    result = integration_result(application, "evidence")
+    pair = result["pairs"][0]
+    diagnosis = next(row for row in application.diagnoses if str(row.id) == pair["diagnosis_id"])
+    assert result["evidence_snapshot"]["documents"][0]["diagnosis"] == diagnosis.name
+    checks = result_checks(application, result, ReferenceSnapshot(reference_version="unconfigured"))
+    assert str(checks[0].item_id) == pair["item_id"]
+    assert checks[0].diagnosis_id == diagnosis.id
+
+
 @pytest.mark.parametrize("group", [None, "adult", "child"])
 def test_save_keeps_group_and_read_works_without_ai(
     group: str | None, library_path: None, monkeypatch: pytest.MonkeyPatch
