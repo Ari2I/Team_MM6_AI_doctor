@@ -14,8 +14,12 @@ async function moduleUrl(path, replacements = []) {
 }
 const contractUrl = await moduleUrl('../src/contract.ts')
 const { parseApplicationCard, CATEGORY_LABELS, CONTRACT_ERROR, reviewReasonLabel, REVIEW_REASON_LABELS } = await import(contractUrl)
+const aiContractUrl = await moduleUrl('../src/ai-report-contract.ts', [
+  ["'./contract'", JSON.stringify(contractUrl)],
+])
 const apiSource = await moduleUrl('../src/api.ts', [
   ["'./contract'", JSON.stringify(contractUrl)],
+  ["'./ai-report-contract'", JSON.stringify(aiContractUrl)],
   ['import.meta.env.VITE_API_URL', "'https://backend.example.test/'"],
 ])
 const { loadApplication, uploadApplication, downloadReport } = await import(apiSource)

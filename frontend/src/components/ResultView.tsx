@@ -3,6 +3,7 @@ import { itemNeedsReview, money } from '../lib/labels'
 import { IssueList } from './Notices'
 import { PurchaseTable } from './PurchaseTable'
 import { SummaryCard } from './SummaryCard'
+import { AIReportPanel } from './AIReportPanel'
 
 type Props = {
   card: ApplicationCard
@@ -66,6 +67,8 @@ export function ResultView({ card, busy, onDownload, onReset }: Props) {
       </div>
       {card.items.length ? <PurchaseTable items={card.items}/> : <p className="muted">Позиций нет.</p>}
     </div>
+
+    {app.status === 'analyzed' && <AIReportPanel applicationId={app.id}/>}
 
     <details className="card tech">
       <summary>Справочник и версия данных</summary>
