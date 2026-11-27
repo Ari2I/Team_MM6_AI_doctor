@@ -16,6 +16,7 @@ from app.services import analysis
 from app.services.ai_adapter import AIAdapter, AIInput
 from app.services.ai_worker import execute
 from app.services.excel_parser import parse_excel
+from app.services.local_clinical_sources import LocalClinicalSources
 from app.services.report import build_report
 from scripts.rag_check import test_file as make_test_file
 from tests.test_ai_analysis import MemorySession
@@ -78,6 +79,8 @@ def real_paths() -> tuple[Path, Path]:
 
 
 def test_real_reference_to_worker_without_purchase_fields(real_paths: tuple[Path, Path]) -> None:
+    from llm_rag.ml2.official import select_edition
+
     registry, cache = real_paths
     adapter = AIAdapter(
         AISettings(
@@ -88,15 +91,27 @@ def test_real_reference_to_worker_without_purchase_fields(real_paths: tuple[Path
             pair_timeout_seconds=120,
         )
     )
-    check = adapter.analyze(
-        AIInput(drug_name="Сальбутамол", diagnosis="J45.9 Бронхиальная астма", age_group="adult"),
-        PairCheck(needs_review=True),
-    )
+    pair = AIInput(drug_name="Сальбутамол", diagnosis="J45.9 Бронхиальная астма", age_group="adult")
+    check = adapter.analyze(pair, PairCheck(needs_review=True))
     assert adapter.last_mnn == "Сальбутамол"
     assert adapter.last_diagnostics["candidate_count"] == 1
-    assert adapter.last_diagnostics["fragment_count"] == 3
+    # Число окон зависит от проверенного снимка и алгоритма подбора. Мост
+    # должен передать актуальные основания целиком, а не вернуть старые три.
+    sources = LocalClinicalSources(cache)
+    candidates = sources.candidates("J45.9", "Взрослые")
+    selected = select_edition(sources, candidates, code="J45.9", age="Взрослые", edition=None)
+    expected = sources.snapshot(pair, adapter.last_mnn)
+    assert expected.documents
+    assert adapter.last_diagnostics["fragment_count"] == len(expected.documents)
+    assert sources.fragment_count == len(expected.documents)
+    assert all(
+        document.version == selected.recommendation.version
+        and document.url == selected.recommendation.primary_url
+        for document in expected.documents
+    )
     assert adapter.last_diagnostics["ml2_status"] == "NEEDS_REVIEW"
     assert adapter.last_diagnostics["model_calls"] == 0
+    assert pair.dosage is None and pair.quantity is None and pair.amount is None
     assert check.category is None and check.needs_review
     assert "359_3" in check.reference_version
 

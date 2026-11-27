@@ -117,6 +117,41 @@ def test_offline_uses_verified_fragments_without_sdk(local_data: tuple[Path, Pat
     assert before == {p.name: p.read_bytes() for p in cache.iterdir()}
 
 
+def test_offline_preserves_all_fragments_in_synthetic_cache(
+    local_data: tuple[Path, Path],
+) -> None:
+    registry, cache = local_data
+    path = next(cache.glob("*.html"))
+    html = path.read_text(encoding="utf-8")
+    extra = "".join(
+        f'<ul class="krt-r" id="extra-{number}">'
+        f"<li>Синтетическое вещество: описание примера {number}.</li></ul>"
+        for number in range(5)
+    )
+    html = html.replace("</ul>", "</ul>" + extra, 1)
+    path.write_text(html, encoding="utf-8")
+    metadata_path = path.with_suffix(".json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["sha256"] = sha256(html.encode()).hexdigest()
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in cache.iterdir()}
+    adapter = AIAdapter(
+        AISettings(
+            mode="offline",
+            registry_path=str(registry),
+            clinical_cache_dir=str(cache),
+            live_sources=True,
+        )
+    )
+    pair = AIInput(drug_name="Синтетический препарат", diagnosis="J45.9", age_group="adult")
+    check = adapter.analyze(pair, PairCheck())
+    assert adapter.last_diagnostics["fragment_count"] == 6
+    assert adapter.last_diagnostics["ml2_status"] == "NEEDS_REVIEW"
+    assert adapter.last_diagnostics["model_calls"] == 0
+    assert check.category is None and check.needs_review
+    assert before == {p.name: p.read_bytes() for p in cache.iterdir()}
+
+
 @pytest.mark.parametrize("damage", ["missing", "expired", "future", "hash", "invalid_json"])
 def test_cache_errors_never_refresh_or_leak(
     local_data: tuple[Path, Path],
