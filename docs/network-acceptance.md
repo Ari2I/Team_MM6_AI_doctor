@@ -1,0 +1,138 @@
+# Реальная сетевая приёмка через загрузку API
+
+Этот сценарий запускает пользователь на тестовом стеке с ai-network, scope
+GIGACHAT_API_B2B, подключённым CA и подготовленным постоянным RAG-томом.
+Реальные GigaChat/Embeddings вызываются только после включения AI_MODE=network
+и загрузки XLSX через nginx с Basic Auth. Ключи не передаются ассистенту.
+Во время контроля не выполнять другие загрузки, чтобы однозначно связать новые
+векторы с контрольной парой. Бюджеты worker и HTTP не увеличиваются.
+
+## Что считается успехом
+
+1. Одна синтетическая покупка, один диагноз с МКБ и явно заданной группой adult.
+   Категория заранее не назначается; совпадение МНН в тексте КР — технический
+   контроль источников, не эталон клинической правильности рекомендации.
+2. IntegrationResult сохранён целиком: COMPLETE, без необработанных пар и
+   технических ошибок, MODEL с валидным staff_analysis, цитатами и снимком оснований.
+3. В индексе появились новые проверенные векторы контрольного текста/поисковой
+   строки. Сам метод vector, число usage.calls или HTTP 200 успех не доказывают.
+4. Версии ГРЛС/редакции КР совпали с подготовкой, индекс согласован с retrieval_info,
+   сохранены SHA сборки. Исходный human_report не подменён backend-текстом.
+5. После пересоздания API с запрещённым внешним доступом повторные GET карточки,
+   AI-отчёта и Excel успешны. Полный сохранённый результат и файлы ГРЛС/индекса не
+   изменились. Старые template-golden в этом шаге не перезаписываются.
+
+Три скрипта печатают только технический результат и допустимые коды причин.
+Заявки, цитаты, ключи, HTTP-тела и сообщения SDK не выводятся. В .local и RAG-томе
+остаются синтетический XLSX, публичная конфигурация синонима и технические хэши/ID.
+Полный IntegrationResult хранится в PostgreSQL. В Git эти артефакты не добавляются.
+
+## 1. Обновить сборку, пока template
+
+В прежнем терминале с dc_network/dc_tls и экспортированными настройками стека:
+
+```bash
+dc_acceptance() {
+  dc_network -f docker-compose.acceptance.yml "$@"
+}
+
+export AI_MODE=template
+export AI_BACKEND_REVISION="$(git rev-parse HEAD)"
+export AI_LIBRARY_REVISION="$(git rev-parse 8836cdb)"
+export GIGACHAT_SCOPE=GIGACHAT_API_B2B
+
+dc_acceptance build api
+dc_acceptance up -d --no-build --force-recreate --wait --wait-timeout 180 api web
+```
+
+Следующий блок запускается только после успешного завершения предыдущего.
+
+## 2. Подготовить публичный контроль без GigaChat
+
+```bash
+dc_acceptance exec -T api python scripts/prepare_network_case.py \
+  --icd10 J45.9 --age-group adult
+
+dc_acceptance exec -T api python scripts/verify_network_acceptance.py --baseline
+
+mkdir -p .local
+dc_acceptance cp api:/var/lib/vrach/rag/acceptance .local/network-acceptance
+```
+
+Подготовка обращается к официальным ГРЛС и API КР с включённым TLS. При отсутствии
+единственной действующей редакции или подходящих фрагментов она останавливается,
+ничего не угадывая. Препарат и обозначение формы берутся из реестра; количество 1
+и сумма 1000 явно заданы как синтетические числа, без утверждения о курсе/цене.
+Существующая папка acceptance не перезаписывается; индекс Embeddings не очищается.
+
+Backend извлекает МКБ из начала названия. Для строки «код + официальный заголовок»
+генерируется явный diagnosis_alias с точным кодом и редакцией КР. Он передаётся
+через отдельный acceptance override, не меняет публичный AI/API-контракт и не
+разрешает произвольные диагнозы. Никакая классификация в подготовке не вызывается.
+
+Если какой-то блок не прошёл, прислать безопасный вывод и остановиться. Не менять
+МКБ, scope, синонимы или лимиты наугад. Если контрольные векторы уже были в индексе,
+проверка нового обращения к Embeddings не пройдёт — это не повод удалить кэш.
+
+## 3. Реальная загрузка
+
+WEB_URL/WEB_USER/WEB_PASSWORD относятся к прежнему nginx, не к GigaChat. Ключ модели
+уже должен быть в окружении API; команды его не печатают и не копируют в файлы.
+
+```bash
+export AI_MODE=network
+dc_acceptance up -d --no-build --force-recreate --wait --wait-timeout 180 api web
+
+export WEB_URL="http://127.0.0.1:${WEB_PORT}"
+.venv/bin/python scripts/run_network_acceptance.py
+
+dc_acceptance exec -T api python scripts/verify_network_acceptance.py --state-stdin \
+  < .local/network-acceptance/state.json
+```
+
+Загрузка выполняется один раз. state.json защищает от случайного повторного POST;
+он содержит только UUID и хэши ответов. При наличии отчёта HTTP-скрипт проверит
+повторное чтение и Excel, но окончательное подтверждение модели/Embeddings даёт
+только проверка сохранённого снимка и новых векторов внутри API.
+
+Проверка фиксирует также положительное TCP-соединение с api.giga.chat до изоляции,
+без HTTP, токена или тела запроса. Запоминается только публичный IP для последующего
+отрицательного контроля. На этом этапе успешные реальные TLS-запросы подтверждаются
+валидным модельным отчётом/новыми векторами и неизменно включённой TLS-проверкой SDK.
+
+## 4. Чтение при запрете внешней сети API
+
+Только после успеха шага 3:
+
+```bash
+dc_acceptance -f docker-compose.no-egress.yml up -d --no-build \
+  --force-recreate --wait --wait-timeout 180 db api web
+
+dc_acceptance -f docker-compose.no-egress.yml exec -T api \
+  python scripts/verify_network_acceptance.py --check-egress-blocked
+
+.venv/bin/python scripts/run_network_acceptance.py --reopen
+
+dc_acceptance -f docker-compose.no-egress.yml exec -T api \
+  python scripts/verify_network_acceptance.py --persistence
+```
+
+API подключён только к отдельной сети с internal=true; db и web доступны ему через
+неё, а web сохраняет прежний опубликованный порт. Исходная сеть Compose и тома не
+удаляются. AI_MODE остаётся network, чтобы чтение проверялось без переключения на
+template. Отрицательный TCP-контроль использует тот же адрес, который был доступен
+до изоляции. --reopen выполняет только GET, не делает повторный анализ.
+--persistence сверяет хэши полного IntegrationResult в БД, ГРЛС и векторного индекса.
+
+## 5. Вернуть обычную сеть и template
+
+После получения результатов:
+
+```bash
+export AI_MODE=template
+dc_acceptance up -d --no-build --force-recreate --wait --wait-timeout 180 db api web
+```
+
+Данные БД, RAG-том и сохранённый отчёт остаются. down -v, удаление сетей/томов и
+очистка индекса не используются. Сетевую приёмку не объявлять успешной, если
+остался хотя бы один неподтверждённый критерий выше.
