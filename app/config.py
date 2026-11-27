@@ -180,6 +180,9 @@ class AISettings(BaseSettings):
     live_sources: bool = False
     # TODO: уточнить у аналитика валюту; backend пока не хранит валюту позиции.
     currency: str = Field(default="RUB", pattern=r"^[A-Z]{3}$")
+    # Метаданные проверенной сборки; пустые значения не разрешают network-запуск.
+    backend_revision: str = Field(default="", pattern=r"^(?:[0-9a-f]{40})?$")
+    library_revision: str = Field(default="", pattern=r"^(?:[0-9a-f]{40})?$")
 
 
 class AINetworkSettings(BaseSettings):

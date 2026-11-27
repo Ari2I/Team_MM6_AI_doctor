@@ -107,6 +107,7 @@ def save_ai_result(
     currency: str,
     backend_revision: str,
     ai_revision: str,
+    snapshot: ReferenceSnapshot | None = None,
 ) -> ApplicationAIResult:
     """Без commit: запись и изменения заявки фиксируются одной транзакцией.
 
@@ -133,7 +134,7 @@ def save_ai_result(
     _same_request(application, value, currency)
     now = datetime.now(UTC)
     try:
-        checks = result_checks(application, value, _load_snapshot(session))
+        checks = result_checks(application, value, snapshot or _load_snapshot(session))
         report = AIReport(
             application_id=application_id,
             saved_at=now,

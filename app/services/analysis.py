@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     Application,
+    ApplicationAIResult,
     ApplicationDiagnosis,
     ApplicationStatus,
     ItemCheck,
@@ -16,6 +17,7 @@ from app.models import (
 )
 from app.schemas.analysis import ReferenceDiagnosis, ReferenceDrug, ReferenceRule, ReferenceSnapshot
 from app.services.ai_adapter import AIAdapter, AIInput
+from app.services.application_ai import analyze_network_application, project_pair, resolved_inn
 from app.services.matching import match_diagnosis, match_drug
 from app.services.rules import check_pair, detect_conflicts, pairs_for_item
 from app.services.summary import (
@@ -56,6 +58,9 @@ def _load_snapshot(session: Session) -> ReferenceSnapshot:
 
 
 def _set_error(session: Session, application: Application) -> Application:
+    session.execute(
+        delete(ApplicationAIResult).where(ApplicationAIResult.application_id == application.id)
+    )
     application.status = ApplicationStatus.ERROR
     application.requires_review = True
     application.warning_message = "Анализ не завершён: требуется проверка человеком."
@@ -70,15 +75,37 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
         raise AnalysisError("Заявка не найдена.")
     try:
         ai_adapter = AIAdapter()
+        # Как в save_ai_result: сначала заявка, затем её снимок. Блокировка
+        # удерживается до общего commit карточки и AI-отчёта.
+        session.execute(
+            select(Application.id).where(Application.id == application.id).with_for_update()
+        )
         snapshot = _load_snapshot(session)
         diagnoses = list(application.diagnoses)
         diagnosis_names = [diagnosis.name for diagnosis in diagnoses]
         items = list(application.items)
+        # Повторный анализ не должен показывать прежний отчёт как новый результат,
+        # включая template/offline и отказ сетевого worker.
+        session.execute(
+            delete(ApplicationAIResult).where(ApplicationAIResult.application_id == application.id)
+        )
         if items:
             session.execute(
                 delete(ItemCheck).where(ItemCheck.item_id.in_([item.id for item in items]))
             )
         session.flush()
+
+        network = None
+        if ai_adapter.settings.mode == "network":
+            for item in items:
+                matched = match_drug(item.drug_name or "", snapshot)
+                item.mnn = matched.mnn
+                item.match_confidence = matched.confidence
+                item.match_note = matched.status
+            session.flush()
+            network = analyze_network_application(
+                session, application, ai_adapter.settings, snapshot
+            )
 
         all_checks: list[ItemCheck] = []
         item_best: list[dict[str, object]] = []
@@ -87,6 +114,12 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
             item.mnn = drug_match.mnn
             item.match_confidence = drug_match.confidence
             item.match_note = drug_match.status
+            if network is not None and not item.mnn:
+                if inn := resolved_inn(network, str(item.id)):
+                    item.mnn = inn
+                    item.match_note = "matched_grls"
+                    # Фасад возвращает МНН, но числовой confidence не предоставляет.
+                    item.match_confidence = None
             pair_names = pairs_for_item(item.diagnosis, diagnosis_names)
             checks_for_item: list[tuple[ApplicationDiagnosis, object, object]] = []
             for diagnosis_name in pair_names:
@@ -95,18 +128,23 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
                     continue
                 diagnosis_match = match_diagnosis(diagnosis_name, snapshot)
                 pair_check = check_pair(drug_match, diagnosis_match, snapshot)
-                pair_check = ai_adapter.analyze(
-                    AIInput(
-                        drug_name=item.drug_name or "",
-                        mnn=drug_match.mnn,
-                        diagnosis=diagnosis_name,
-                        dosage=item.dosage,
-                        quantity=item.quantity,
-                        amount=item.amount,
-                        age_group=application.age_group,
-                    ),
-                    pair_check,
-                )
+                if network is not None:
+                    pair_check = project_pair(
+                        pair_check, network, str(item.id), str(diagnosis_row.id)
+                    )
+                else:
+                    pair_check = ai_adapter.analyze(
+                        AIInput(
+                            drug_name=item.drug_name or "",
+                            mnn=drug_match.mnn,
+                            diagnosis=diagnosis_name,
+                            dosage=item.dosage,
+                            quantity=item.quantity,
+                            amount=item.amount,
+                            age_group=application.age_group,
+                        ),
+                        pair_check,
+                    )
                 if ai_adapter.last_mnn and not drug_match.mnn:
                     item.mnn = ai_adapter.last_mnn
                     item.match_note = "matched_grls"
@@ -143,7 +181,11 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
         application.category_shares = shares
         application.requires_review = has_review
         application.warning_message = build_warning_message(all_checks)
-        if snapshot.reference_version == "unconfigured" and not ai_adapter.settings.registry_path:
+        if (
+            snapshot.reference_version == "unconfigured"
+            and not ai_adapter.settings.registry_path
+            and network is None
+        ):
             application.warning_message = (
                 "Рабочий справочник не подключён. МНН и категории не определены; "
                 "требуется проверка человеком."
