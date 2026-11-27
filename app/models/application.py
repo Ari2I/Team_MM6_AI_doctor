@@ -6,18 +6,40 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.types import ExactAmount
 from app.models.enums import ApplicationStatus, DrugCategory, TrafficLight
 from app.schemas.validation import IssueLevel
 
 
 class Application(Base):
     __tablename__ = "applications"
+    __table_args__ = (
+        CheckConstraint(
+            "integration_input IS NULL OR (jsonb_typeof(integration_input) = 'object' "
+            "AND (integration_input->>'schema_version') IS NOT DISTINCT FROM "
+            "'integration-request.1')",
+            name="ck_application_integration_input",
+        ),
+    )
     age_group: Mapped[str | None] = mapped_column(Text)
+    # Канонический integration-request.1: точный возраст/редакция/явные связи.
+    # NULL сохраняет прежние правила связей для плоского Excel.
+    integration_input: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     filename: Mapped[str] = mapped_column(Text)
@@ -85,7 +107,7 @@ class ApplicationItem(Base):
     diagnosis: Mapped[str | None] = mapped_column(Text)
     dosage: Mapped[str | None] = mapped_column(Text)
     quantity: Mapped[Decimal | None] = mapped_column(Numeric())
-    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    amount: Mapped[Decimal | None] = mapped_column(ExactAmount())
     mnn: Mapped[str | None] = mapped_column(Text)
     match_confidence: Mapped[float | None]
     match_note: Mapped[str | None] = mapped_column(Text)

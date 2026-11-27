@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -10,7 +11,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from app.models import Application
+from app.models import Application, ApplicationDiagnosis, ApplicationItem
 from app.models.enums import ReviewReason
 from app.services.rules import pairs_for_item
 
@@ -84,6 +85,8 @@ def prepare_integration_request(
     age_group = application.age_group or None
     if age_group not in {None, "adult", "child"}:
         raise IntegrationMappingError("age_group")
+    if application.integration_input is not None:
+        return _prepare_workbook_input(application)
 
     diagnoses: list[dict[str, Any]] = []
     diagnosis_ids: set[str] = set()
@@ -146,6 +149,62 @@ def prepare_integration_request(
         age_group=age_group,
         rows_by_item_id=rows,
     )
+
+
+def _prepare_workbook_input(application: Application) -> PreparedIntegrationRequest:
+    """Сохранённые условия/редакции/связи и актуальные строки одной заявки."""
+    payload = deepcopy(application.integration_input)
+    items = {str(i.id): i for i in application.items}
+    diagnoses = {str(d.id): d for d in application.diagnoses}
+    try:
+        if payload["request_id"] != str(application.id):
+            raise ValueError()
+        if {p["item_id"] for p in payload["purchases"]} != set(items):
+            raise ValueError()
+        if {d["diagnosis_id"] for d in payload["diagnoses"]} != set(diagnoses):
+            raise ValueError()
+        for purchase in payload["purchases"]:
+            item = items[purchase["item_id"]]
+            purchase.update(
+                name=_text(item.drug_name, "drug_name", item.row_number),
+                dosage=item.dosage,
+            )
+            for field in ("quantity", "amount"):
+                current = _number(getattr(item, field), field, item.row_number)
+                original = purchase[field]
+                if current is not None and original is not None:
+                    if Decimal(current) == Decimal(original):
+                        continue
+                purchase[field] = current
+        for diagnosis in payload["diagnoses"]:
+            diagnosis["name"] = _text(diagnoses[diagnosis["diagnosis_id"]].name, "diagnosis")
+        if any(
+            link["item_id"] not in items or link["diagnosis_id"] not in diagnoses
+            for link in payload["links"]
+        ):
+            raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        raise IntegrationMappingError() from None
+    return PreparedIntegrationRequest(
+        payload=payload,
+        age_group=application.age_group,
+        rows_by_item_id={str(i.id): i.row_number for i in application.items},
+    )
+
+
+def diagnoses_for_item(
+    application: Application, item: ApplicationItem
+) -> list[ApplicationDiagnosis]:
+    """Для AI-книги только явные связи; для плоского файла — прежняя семантика."""
+    if application.integration_input is None:
+        names = pairs_for_item(item.diagnosis, [d.name for d in application.diagnoses])
+        return [next(d for d in application.diagnoses if d.name == name) for name in names]
+    ids = {
+        link["diagnosis_id"]
+        for link in application.integration_input["links"]
+        if link["item_id"] == str(item.id)
+    }
+    return [d for d in application.diagnoses if str(d.id) in ids]
 
 
 def validate_integration_request(prepared: PreparedIntegrationRequest) -> dict[str, Any]:

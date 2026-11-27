@@ -24,8 +24,9 @@ from app.services.application_ai import (
     project_pair,
     resolved_inn,
 )
+from app.services.integration_mapping import diagnoses_for_item
 from app.services.matching import match_diagnosis, match_drug
-from app.services.rules import check_pair, detect_conflicts, pairs_for_item
+from app.services.rules import check_pair, detect_conflicts
 from app.services.summary import (
     best_category,
     build_summary,
@@ -104,8 +105,6 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
             select(Application.id).where(Application.id == application.id).with_for_update()
         )
         snapshot = _load_snapshot(session) if settings.use_backend_reference else None
-        diagnoses = list(application.diagnoses)
-        diagnosis_names = [diagnosis.name for diagnosis in diagnoses]
         items = list(application.items)
         # Повторный анализ не должен показывать прежний отчёт как новый результат,
         # включая template/offline и отказ сетевого worker.
@@ -149,12 +148,9 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
                     item.match_note = "matched_grls"
                     # Фасад возвращает МНН, но числовой confidence не предоставляет.
                     item.match_confidence = None
-            pair_names = pairs_for_item(item.diagnosis, diagnosis_names)
             checks_for_item: list[tuple[ApplicationDiagnosis, object, object]] = []
-            for diagnosis_name in pair_names:
-                diagnosis_row = next((row for row in diagnoses if row.name == diagnosis_name), None)
-                if diagnosis_row is None:
-                    continue
+            for diagnosis_row in diagnoses_for_item(application, item):
+                diagnosis_name = diagnosis_row.name
                 if snapshot is None:
                     assert network is not None
                     pair_check = project_ai_pair(network, str(item.id), str(diagnosis_row.id))

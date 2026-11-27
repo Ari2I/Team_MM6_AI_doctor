@@ -51,6 +51,8 @@ def _same_request(application: Application, result: dict[str, Any], currency: st
         raise AIReportError() from None
     if actual.request_id != expected.request_id:
         raise AIReportError()
+    if actual.versions != expected.versions:
+        raise AIReportError()
     # Decimal сравнивается по значению: PostgreSQL Numeric(12, 2) может вернуть
     # другую шкалу, не меняя исходной суммы. Тексты и остальные поля — строго.
     for field, key in (("purchases", "item_id"), ("diagnoses", "diagnosis_id")):

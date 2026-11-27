@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from decimal import Decimal
 from time import monotonic
 from typing import Annotated
 from uuid import UUID
@@ -14,7 +15,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 from starlette.exceptions import HTTPException
 
-from app.config import CATEGORY_LABELS, DISCLAIMER, get_access_settings, get_validation_settings
+from app.config import (
+    CATEGORY_LABELS,
+    DISCLAIMER,
+    AISettings,
+    get_access_settings,
+    get_validation_settings,
+)
 from app.models import (
     Application,
     ApplicationAIResult,
@@ -38,6 +45,7 @@ from app.schemas.application_api import (
 from app.services.ai_reports import AIReportError, read_ai_report
 from app.services.analysis import analyze_application
 from app.services.excel_parser import ExcelParseError, parse_excel
+from app.services.integration_upload import IntegrationUploadError, application_from_ai_workbook
 from app.services.presentation import humanize_warning_text
 from app.services.report import build_report
 from app.services.validator import validate_file, validate_parse_result
@@ -124,7 +132,11 @@ def _card(application: Application, session: Session | None = None) -> Applicati
                 drug_name=item.drug_name,
                 mnn=item.mnn,
                 match_confidence=item.match_confidence,
-                amount=item.amount,
+                amount=(
+                    item.amount.quantize(Decimal("0.01"))
+                    if item.amount is not None and item.amount.as_tuple().exponent > -2
+                    else item.amount
+                ),
                 checks=checks,
             )
         )
@@ -191,7 +203,17 @@ def create_application(
         content = file.file.read(settings.max_excel_size_bytes + 1)
         if len(content) > settings.max_excel_size_bytes:
             return _error("file_too_large", "Размер файла превышает допустимый лимит.")
-        parsed = parse_excel(content)
+        application = application_from_ai_workbook(
+            content,
+            filename=file.filename or "application.xlsx",
+            mode=AISettings().mode,
+            diagnoses=diagnoses,
+            age_group=age_group or None,
+        )
+        if application is None:
+            parsed = parse_excel(content)
+    except IntegrationUploadError as error:
+        return _error("parse_issue", str(error))
     except ExcelParseError:
         return _error(
             "invalid_excel", "Не удалось прочитать файл Excel. Передайте исправный файл XLSX."
@@ -199,46 +221,47 @@ def create_application(
     finally:
         file.file.close()
 
-    diagnoses = diagnoses or []
-    report = validate_parse_result(parsed, diagnoses)
-    if not report.is_valid:
-        return _issues_response(report.issues)
+    if application is None:
+        diagnoses = diagnoses or []
+        report = validate_parse_result(parsed, diagnoses)
+        if not report.is_valid:
+            return _issues_response(report.issues)
 
-    application = Application(
-        filename=file.filename or "application.xlsx",
-        status=ApplicationStatus.PARSED,
-        age_group=age_group or None,
-    )
-    application.diagnoses = [
-        ApplicationDiagnosis(name=name)
-        for name in _unique_diagnoses(
-            [*(item.diagnosis for item in parsed.items if item.diagnosis), *diagnoses]
+        application = Application(
+            filename=file.filename or "application.xlsx",
+            status=ApplicationStatus.PARSED,
+            age_group=age_group or None,
         )
-    ]
-    canonical_diagnoses = {row.name.casefold(): row.name for row in application.diagnoses}
-    application.items = [
-        ApplicationItem(
-            row_number=item.row_number,
-            drug_name=item.drug_name,
-            diagnosis=canonical_diagnoses[item.diagnosis.strip().casefold()]
-            if item.diagnosis
-            else None,
-            dosage=item.dosage,
-            quantity=item.quantity,
-            amount=item.amount,
-        )
-        for item in parsed.items
-    ]
-    application.validation_issues = [
-        ValidationIssue(
-            level=issue.level,
-            code=issue.code.value,
-            message=issue.message,
-            row=issue.row,
-            column=issue.column,
-        )
-        for issue in report.issues
-    ]
+        application.diagnoses = [
+            ApplicationDiagnosis(name=name)
+            for name in _unique_diagnoses(
+                [*(item.diagnosis for item in parsed.items if item.diagnosis), *diagnoses]
+            )
+        ]
+        canonical_diagnoses = {row.name.casefold(): row.name for row in application.diagnoses}
+        application.items = [
+            ApplicationItem(
+                row_number=item.row_number,
+                drug_name=item.drug_name,
+                diagnosis=canonical_diagnoses[item.diagnosis.strip().casefold()]
+                if item.diagnosis
+                else None,
+                dosage=item.dosage,
+                quantity=item.quantity,
+                amount=item.amount,
+            )
+            for item in parsed.items
+        ]
+        application.validation_issues = [
+            ValidationIssue(
+                level=issue.level,
+                code=issue.code.value,
+                message=issue.message,
+                row=issue.row,
+                column=issue.column,
+            )
+            for issue in report.issues
+        ]
     session.add(application)
     session.commit()
     application = analyze_application(session, application.id)
