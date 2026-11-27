@@ -1,5 +1,9 @@
 # Сборка защиты: только фасад AI
 
+После исправления подбора категорий и добавления AI-книг используйте актуальную
+[контейнерную приёмку](category-fix-acceptance.md). Новые миграции обязательны;
+исходники AI этой сборки содержат локальные исправления поверх 8836cdb.
+
 По согласованному решению тимлида в этой сборке backend-справочник не участвует
 в анализе. Он остаётся в БД и доступен прежним режимам; удаление отложено.
 API, схема БД, frontend и AI-библиотека не меняются.
@@ -50,13 +54,13 @@ dc_defense() {
 }
 
 export AI_BACKEND_REVISION="$(git rev-parse HEAD)"
-export AI_LIBRARY_REVISION="$(git rev-parse 8836cdb)"
+export AI_LIBRARY_REVISION="$(git log -1 --format=%H -- ai/src/llm_rag)"
 export GIGACHAT_SCOPE=GIGACHAT_API_B2B
 
-git diff --quiet HEAD:ai 8836cdb
+git diff --quiet HEAD -- ai/src/llm_rag
 dc_defense build api web
+dc_defense run --rm --no-deps api alembic upgrade head
 dc_defense up -d --no-build --force-recreate --wait --wait-timeout 180 api web
-dc_defense exec -T api alembic upgrade head
 dc_defense exec -T api alembic check
 dc_defense exec -T api python scripts/check_network_build.py --check-probe
 ```
