@@ -32,7 +32,7 @@ GigaChat может подготовить текстовое объяснени
 ```bash
 export AI_MODE=template
 export AI_BACKEND_REVISION="$(git rev-parse HEAD)"
-export AI_LIBRARY_REVISION="$(git rev-parse 8836cdb)"
+export AI_LIBRARY_REVISION="$(git log -1 --format=%H -- ai/src/llm_rag)"
 export GIGACHAT_SCOPE=GIGACHAT_API_B2B
 export RAG_ACCEPTANCE_TERMS=/var/lib/vrach/rag/acceptance-controls-inn/network-terms.json
 

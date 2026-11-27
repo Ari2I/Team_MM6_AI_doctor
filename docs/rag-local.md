@@ -1,5 +1,10 @@
 # Локальные справочники и полный путь обработки
 
+> Это инструкция прежнего попарного моста и исторический отчёт о поставке кэша.
+> Для новой установки используйте [installation.md](installation.md) или
+> [network-setup.md](network-setup.md). Размеры/версии и состояние кэша ниже
+> описывают тогдашнюю проверку, а не текущую доступность источников.
+
 Рабочая ветка: `integration/techno-razbor`. Проверено на исходниках этой сборки,
 без запуска старого demo_07.11 и без автономного `excel_scenario.process_card`.
 
@@ -27,7 +32,7 @@
 | `AI_REGISTRY_PATH` | JSON-файл ГРЛС, путь в процессе API |
 | `AI_CLINICAL_CACHE_DIR` | Доступный для записи каталог кэша КР |
 | `AI_LIVE_SOURCES` | Разрешает получение КР через кэш и сеть; default `false` |
-| `AI_MODE` | `template`: источники и шаблоны, `offline`: без сети, `network`: GigaChat |
+| `AI_MODE` | `template`: только backend-правила/шаблоны, без AI-импортов; `offline`: локальный мост без сети; `network`: фасад целой заявки |
 | `AI_PAIR_TIMEOUT_SECONDS` | Бюджет на одну пару, для локального RAG рекомендовано 120 |
 | `AI_APPLICATION_TIMEOUT_SECONDS` | Бюджет заявки, для локального RAG рекомендовано 240 |
 
@@ -108,14 +113,15 @@ docker compose -f docker-compose.yml -f docker-compose.certs.yml -f docker-compo
 
 Следующую команду выполнять только после успеха предыдущей. Откройте прежний
 адрес интерфейса, выберите возрастную группу и загрузите XLSX с кодом МКБ-10 в
-диагнозе. Остальные заголовки Excel не менялись. Для обработки без модели можно
-поставить `AI_MODE=template`, сохранив `AI_LIVE_SOURCES=true` и образ с AI-библиотекой.
+диагнозе. Остальные заголовки Excel не менялись. В текущем `template` адаптер сразу
+возвращает backend-правила и не читает эти AI-источники, независимо от флага
+`AI_LIVE_SOURCES`. Старый локальный мост проверяется в `offline` без сети.
 
 Поэтапная проверка из API-контейнера, без вывода секретов или заявок:
 
 ```powershell
-docker exec proekt_prac_2-api-1 python scripts/rag_check.py --network-sources --model
-docker exec proekt_prac_2-api-1 python scripts/rag_check.py --api-url http://127.0.0.1:8000
+docker compose -f docker-compose.yml -f docker-compose.certs.yml -f docker-compose.rag.yml exec -T api python scripts/rag_check.py --network-sources --model
+docker compose -f docker-compose.yml -f docker-compose.certs.yml -f docker-compose.rag.yml exec -T api python scripts/rag_check.py --api-url http://127.0.0.1:8000
 ```
 
 Первая команда отдельно проверяет источники, реальную загрузку отсутствующей КР,

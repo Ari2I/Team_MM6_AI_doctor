@@ -1,5 +1,10 @@
 # Подготовка сетевой сборки без запросов к модели
 
+Для самостоятельной установки с нуля на Windows/macOS/Linux используйте
+[network-setup.md](network-setup.md). Далее сохранена процедура прежнего
+терминала с `dc_rag` и bind-кэшем; upstream `8836cdb` — исходная версия,
+не SHA нынешних исправленных исходников.
+
 Этот шаг проверяет network-образ, CA, запись от appuser и сохранность отдельного
 RAG-тома после пересоздания API. AI_MODE остаётся template. Клиенты GigaChat не
 создаются, ключ не читается проверочным скриптом, источники и модели не скачиваются.
@@ -35,10 +40,10 @@ dc_network() {
 export API_BUILD_TARGET=ai-network AI_MODE=template AI_LIVE_SOURCES=false
 export GIGACHAT_SCOPE=GIGACHAT_API_B2B
 export AI_BACKEND_REVISION="$(git rev-parse HEAD)"
-export AI_LIBRARY_REVISION="$(git rev-parse 8836cdb)"
+export AI_LIBRARY_REVISION="$(git log -1 --format=%H -- ai/src/llm_rag)"
 
 # Убедиться, что AI-исходники соответствуют указанной ревизии: код возврата 0.
-git diff --quiet HEAD:ai 8836cdb
+git diff --quiet HEAD -- ai/src/llm_rag
 
 dc_network build api
 ```
