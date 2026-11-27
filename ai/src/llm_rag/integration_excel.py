@@ -1,6 +1,7 @@
 """Многодиагнозный Excel → фасад → сохранённые JSON и HTML одной заявки."""
 
 from io import BytesIO
+from dataclasses import dataclass
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile
 from zlib import error as CompressionError
@@ -21,6 +22,14 @@ HEADERS = {
     "Связи": ["ID позиции", "ID диагноза"],
 }
 
+DIAGNOSIS_OPTIONAL_HEADERS = ("Возрастная группа", "Редакция КР")
+
+
+@dataclass(frozen=True, repr=False)
+class IntegrationWorkbook:
+    request: IntegrationRequest
+    rows_by_item_id: dict[str, int]
+
 
 def _decimal(value):
     if value is None:
@@ -35,9 +44,19 @@ def read_integration_card(path: Path) -> IntegrationRequest:
     path = Path(path)
     if path.stat().st_size > 10_000_000:
         raise ValueError("Размер XLSX превышает 10 МБ.")
-    content = path.read_bytes()
+    return read_integration_bytes(path.read_bytes())
+
+
+def read_integration_bytes(content: bytes) -> IntegrationRequest:
+    """The same parser for HTTP bytes and the standalone CLI; no temporary file."""
+    return read_integration_workbook(content).request
+
+
+def read_integration_workbook(content: bytes) -> IntegrationWorkbook:
+    if len(content) > 10_000_000:
+        raise ValueError("Размер XLSX превышает 10 МБ.")
     try:
-        return _read_content(path, content)
+        return _read_content(Path("upload.xlsx"), content)
     except (
         BadZipFile, CompressionError, EOFError, InvalidFileException, LookupError,
         NotImplementedError, OverflowError, SyntaxError, TypeError,
@@ -46,7 +65,7 @@ def read_integration_card(path: Path) -> IntegrationRequest:
         raise ValueError("Не удалось прочитать структуру XLSX.") from None
 
 
-def _read_content(path: Path, content: bytes) -> IntegrationRequest:
+def _read_content(path: Path, content: bytes) -> IntegrationWorkbook:
     with ZipFile(BytesIO(content)) as archive:
         if sum(info.file_size for info in archive.infolist()) > 100_000_000:
             raise ValueError("Распакованный XLSX превышает 100 МБ.")
@@ -59,7 +78,7 @@ def _read_content(path: Path, content: bytes) -> IntegrationRequest:
 
             card = read_card(path, content=content)
             request = card.request
-            return IntegrationRequest.model_validate(
+            value = IntegrationRequest.model_validate(
                 dict(
                     schema_version="integration-request.1",
                     request_id=request.request_id,
@@ -69,7 +88,11 @@ def _read_content(path: Path, content: bytes) -> IntegrationRequest:
                             name=request.diagnosis,
                             icd10=request.context.get("icd10"),
                             recommendation_edition=request.context.get("recommendation_edition"),
-                            conditions={"age_years": request.context.get("age")},
+                            conditions={
+                                "age_years": request.context.get("age"),
+                                "age_group": {"Взрослые": "adult", "Дети": "child"}.get(
+                                    request.context.get("age_group"), request.context.get("age_group")),
+                            },
                         )
                     ],
                     purchases=[
@@ -86,11 +109,18 @@ def _read_content(path: Path, content: bytes) -> IntegrationRequest:
                     links=[dict(item_id=i.item_id, diagnosis_id=card.diagnosis_id) for i in request.items],
                 )
             )
+            book["Покупки"].reset_dimensions()
+            rows = {row[0].value: index for index, row in enumerate(
+                book["Покупки"].iter_rows(min_row=2, max_col=1), 2) if row[0].value is not None}
+            return IntegrationWorkbook(value, rows)
         if set(book.sheetnames) != set(HEADERS):
             raise ValueError("Нужны только листы Заявка, Диагнозы, Покупки, Связи.")
         check_numeric_amounts(book["Покупки"], 10001)
         sheets = {}
-        for name, headers in HEADERS.items():
+        diagnosis_headers = HEADERS["Диагнозы"]
+        purchase_rows = {}
+        for name, base_headers in HEADERS.items():
+            headers = list(base_headers)
             sheet = book[name]
             sheet.reset_dimensions()
             values = []
@@ -100,6 +130,16 @@ def _read_content(path: Path, content: bytes) -> IntegrationRequest:
                 if any(c.data_type in {"f", "e"} for c in row):
                     raise ValueError("Используйте значения без формул и ошибок Excel.")
                 fields = [cell.value for cell in row]
+                if index == 1 and name == "Диагнозы":
+                    while fields and fields[-1] is None:
+                        fields.pop()
+                    optional = fields[len(base_headers):]
+                    if (fields[:len(base_headers)] != base_headers
+                            or len(set(optional)) != len(optional)
+                            or any(h not in DIAGNOSIS_OPTIONAL_HEADERS for h in optional)):
+                        raise ValueError("Заголовки XLSX не совпадают с контрактом.")
+                    headers = list(fields)
+                    diagnosis_headers = headers
                 if any(value is not None for value in fields[len(headers) :]):
                     raise ValueError("Лишние столбцы в XLSX.")
                 fields = (fields + [None] * len(headers))[: len(headers)]
@@ -108,16 +148,20 @@ def _read_content(path: Path, content: bytes) -> IntegrationRequest:
                         raise ValueError("Заголовки XLSX не совпадают с контрактом.")
                 elif any(value is not None for value in fields):
                     values.append(fields)
+                    if name == "Покупки":
+                        purchase_rows[fields[0]] = index
             sheets[name] = values
         if len(sheets["Заявка"]) != 1 or sheets["Заявка"][0][0] != "ID заявки":
             raise ValueError("На листе Заявка должен быть только ID заявки.")
         value = dict(
             schema_version="integration-request.1",
             request_id=sheets["Заявка"][0][1],
-            diagnoses=[
-                dict(diagnosis_id=d[0], name=d[1], icd10=d[2], conditions={"age_years": _decimal(d[3])})
-                for d in sheets["Диагнозы"]
-            ],
+            diagnoses=[dict(
+                diagnosis_id=d[0], name=d[1], icd10=d[2],
+                conditions={"age_years": _decimal(d[3]),
+                            "age_group": dict(zip(diagnosis_headers, d)).get("Возрастная группа")},
+                recommendation_edition=dict(zip(diagnosis_headers, d)).get("Редакция КР"),
+            ) for d in sheets["Диагнозы"]],
             purchases=[
                 dict(
                     item_id=p[0],
@@ -132,7 +176,7 @@ def _read_content(path: Path, content: bytes) -> IntegrationRequest:
             links=[dict(item_id=p[0], diagnosis_id=p[1]) for p in sheets["Связи"]],
         )
         try:
-            return IntegrationRequest.model_validate(value)
+            return IntegrationWorkbook(IntegrationRequest.model_validate(value), purchase_rows)
         except ValidationError:
             raise ValueError("Некорректные ID, связи, диагнозы или поля покупок в XLSX.") from None
     finally:

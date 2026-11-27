@@ -22,7 +22,7 @@ from llm_rag.providers.base import PROVIDER_ERROR_MESSAGES
 
 HEADERS = ['ID позиции', 'Препарат', 'Дозировка', 'Количество', 'Сумма', 'Валюта']
 CARD_FIELDS = {'ID заявки', 'ID диагноза', 'Диагноз', 'Код МКБ-10', 'Возраст',
-               'Учебная заявка', 'Редакция КР'}
+               'Учебная заявка', 'Редакция КР', 'Возрастная группа'}
 MAX_LEGACY_QUANTITY = 1_000_000
 
 
@@ -127,6 +127,13 @@ def read_card(path: Path, *, content: bytes | None = None) -> ExcelCard:
         context = dict(icd10=code)
         if age is not None:
             context.update(age=str(age), age_group='Взрослые' if age >= 18 else 'Дети')
+        group = fields.get('Возрастная группа')
+        if group not in {None, '', 'adult', 'child'}:
+            raise ValueError('Возрастная группа должна быть adult или child.')
+        if group:
+            if age is not None and group != ('adult' if age >= 18 else 'child'):
+                raise ValueError('Возрастная группа противоречит точному возрасту.')
+            context['age_group'] = {'adult': 'Взрослые', 'child': 'Дети'}[group]
         if fields.get('Редакция КР'):
             context['recommendation_edition'] = _text(fields['Редакция КР'], 'Редакция КР')
         try:
