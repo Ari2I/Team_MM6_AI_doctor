@@ -1,5 +1,10 @@
 # AI-отчёт при загрузке заявки
 
+Для защиты согласован отдельный путь без backend-справочника:
+[сборка защиты](defense-build.md), `AI_USE_BACKEND_REFERENCE=false` и `AI_MODE=network`.
+В нём карточка/Excel строятся только из фасада; SQL-fallback ниже описывает
+сохранённый прежний режим с `AI_USE_BACKEND_REFERENCE=true` (по умолчанию).
+
 POST /applications сохраняет разобранную заявку и вызывает существующий анализ.
 В AI_MODE=template/offline работает прежний попарный путь. В AI_MODE=network
 после SQL-сопоставления МНН вызывается один IntegrationWorkerClient на всю заявку:

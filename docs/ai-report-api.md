@@ -1,5 +1,10 @@
 # Сохранённый AI-отчёт
 
+В [сборке защиты](defense-build.md) `checks[].backend_rule.category` и
+`reference_version` равны `null`, а `source` явно сообщает об отключении
+backend-проверки. Схема обёртки и `human_report` не меняются. Описанный далее
+приоритет SQL относится к прежнему режиму `AI_USE_BACKEND_REFERENCE=true`.
+
 `GET /applications/{application_id}/ai-report` читает последний сохранённый
 AI-результат заявки. Запрос не выполняет анализ, не загружает источники и не
 вызывает GigaChat/Embeddings. Текущие `ApplicationCard` и Excel не меняются.
