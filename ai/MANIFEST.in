@@ -1,0 +1,43 @@
+recursive-include src/llm_rag/ml2/instructions *.md *.json
+recursive-include src/llm_rag *.md
+recursive-include docs *.md
+recursive-include examples *.json *.md
+include requirements-dev.txt
+include data/rag/README.md data/rag/manifest.json
+include check_local.py
+include docs/ТЗ.docx
+include excel_input/README.md
+include excel_input/01_Подходящие_препараты.xlsx
+include excel_input/02_Препарат_другого_назначения.xlsx
+include .github/workflows/llm-rag.yml
+include requirements-py311-win.lock
+recursive-include tests *.py *.md
+include excel_cases/README.md
+include excel_cases/SHA256.txt
+include excel_cases/Ожидания.md
+include excel_cases/review_20261112/README.md
+include excel_cases/review_20261112/manifest.json
+include excel_cases/review_20261112/SHA256.json
+include excel_cases/review_20261112/input/01_Обычная_карточка.xlsx
+include excel_cases/review_20261112/input/02_Другое_назначение.xlsx
+include excel_cases/review_20261112/input/03_Неизвестный_препарат.xlsx
+include excel_cases/review_20261112/input/04_Возраст_неизвестен.xlsx
+include excel_cases/review_20261112/input/05_Комбинированный_препарат.xlsx
+include excel_cases/review_20261112/input/06_Повторные_покупки_валюты.xlsx
+include excel_cases/review_20261112/input/07_Отрицательная_сумма.xlsx
+include excel_cases/review_20261112/input/08_Повторный_ID.xlsx
+include excel_cases/review_20261112/input/09_Формула_вместо_суммы.xlsx
+include excel_cases/review_20261112/input/10_Устаревший_диапазон.xlsx
+include excel_cases/multidiagnosis_20261117/README.md
+include excel_cases/multidiagnosis_20261117/manifest.json
+include excel_cases/multidiagnosis_20261117/SHA256.json
+include excel_cases/multidiagnosis_20261117/input/currencies.xlsx
+include excel_cases/multidiagnosis_20261117/input/duplicate_id.xlsx
+include excel_cases/multidiagnosis_20261117/input/fifty.xlsx
+include excel_cases/multidiagnosis_20261117/input/form_mismatch.xlsx
+include excel_cases/multidiagnosis_20261117/input/invalid_link.xlsx
+include excel_cases/multidiagnosis_20261117/input/missing_condition.xlsx
+include excel_cases/multidiagnosis_20261117/input/single.xlsx
+include excel_cases/multidiagnosis_20261117/input/ten.xlsx
+include excel_cases/multidiagnosis_20261117/input/two.xlsx
+include excel_cases/multidiagnosis_20261117/input/unknown.xlsx

@@ -1,0 +1,5 @@
+# Только синтетическая приёмка; policy содержит публичное соответствие МКБ/КР.
+services:
+  api:
+    environment:
+      RAG_NETWORK_TERMS: ${RAG_ACCEPTANCE_TERMS:-/var/lib/vrach/rag/acceptance/network-terms.json}

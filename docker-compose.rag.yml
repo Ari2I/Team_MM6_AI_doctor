@@ -1,0 +1,26 @@
+# Public reference data are mounted, never copied into an image.
+services:
+  api:
+    build:
+      target: ${API_BUILD_TARGET:-ai-network}
+    environment:
+      AI_MODE: ${AI_MODE:-network}
+      AI_CORPUS_PATH: ""
+      AI_REGISTRY_PATH: /run/rag/grls/registry.json
+      AI_CLINICAL_CACHE_DIR: /run/rag/clinicalrecs
+      AI_LIVE_SOURCES: ${AI_LIVE_SOURCES:-true}
+      AI_PAIR_TIMEOUT_SECONDS: ${AI_PAIR_TIMEOUT_SECONDS:-120}
+      AI_APPLICATION_TIMEOUT_SECONDS: ${AI_APPLICATION_TIMEOUT_SECONDS:-240}
+    volumes:
+      - type: bind
+        source: ${RAG_REGISTRY_SOURCE:-./.local/rag-data/grls/registry.json}
+        target: /run/rag/grls/registry.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RAG_CACHE_SOURCE:-./.local/rag-data/clinicalrecs}
+        target: /run/rag/clinicalrecs
+        read_only: false
+        bind:
+          create_host_path: false

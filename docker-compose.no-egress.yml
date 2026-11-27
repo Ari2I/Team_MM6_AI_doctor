@@ -1,0 +1,17 @@
+# API имеет только внутреннюю сеть; web и db остаются достижимыми для него.
+services:
+  api:
+    networks:
+      acceptance_internal: {}
+  web:
+    networks:
+      default: {}
+      acceptance_internal: {}
+  db:
+    networks:
+      default: {}
+      acceptance_internal: {}
+
+networks:
+  acceptance_internal:
+    internal: true

@@ -1,0 +1,66 @@
+name: LLM RAG library
+
+on:
+  push:
+    branches: [llm_rag]
+  pull_request:
+    branches: [llm_rag]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Установка инструментов библиотеки
+        run: python -m pip install -e ".[dev]"
+      - name: Статическая проверка
+        run: python -m ruff check src tests check_local.py
+      - name: Бесплатные регрессии без API
+        run: python -m pytest -q
+      - name: Сборка wheel и sdist
+        run: python -m build
+      - name: Установка собранного wheel
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+          import sys
+          wheel = next(Path('dist').glob('*.whl'))
+          subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--force-reinstall', '--no-deps', str(wheel)])
+      - name: Проверка содержимого установленного wheel
+        shell: python
+        run: |
+          import json
+          import subprocess
+          import sys
+          from importlib import metadata, resources
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+
+          import llm_rag
+          assert not Path(llm_rag.__file__).resolve().is_relative_to(Path("src").resolve())
+          with TemporaryDirectory() as folder:
+              subprocess.run([sys.executable, "-m", "llm_rag", "--export-schemas", folder],
+                             cwd=folder, check=True, timeout=30)
+              assert len(list(Path(folder).glob("*.schema.json"))) == 6
+          rules = resources.files("llm_rag.ml2") / "instructions/classification_rules.json"
+          assert json.loads(rules.read_text(encoding="utf-8"))["policy_version"] == "ml2-policy.4"
+          assert not any(name.startswith(("torch", "transformers", "huggingface-hub"))
+                         for name in metadata.requires("llm-rag") or [])

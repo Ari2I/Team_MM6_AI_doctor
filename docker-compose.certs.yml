@@ -1,0 +1,11 @@
+services:
+  api:
+    environment:
+      GIGACHAT_CA_BUNDLE_FILE: /run/certs/gigachat-ca.pem
+    volumes:
+      - type: bind
+        source: ./certs/gigachat-ca.pem
+        target: /run/certs/gigachat-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,25 @@
+{
+  "reference_version": "demo-api-1",
+  "is_synthetic": true,
+  "drugs": [
+    {"trade_name": "Нурофен", "mnn": "Демо-МНН-01"},
+    {"trade_name": "Но-шпа", "mnn": "Демо-МНН-02"},
+    {"trade_name": "Панадол", "mnn": "Демо-МНН-03"},
+    {"trade_name": "Конкор", "mnn": "Демо-МНН-04"},
+    {"trade_name": "Омез", "mnn": "Демо-МНН-05"},
+    {"trade_name": "Супрастин", "mnn": "Демо-МНН-06"}
+  ],
+  "diagnoses": [
+    {"diagnosis_id": "d1", "name": "Учебный диагноз 01"},
+    {"diagnosis_id": "d2", "name": "Учебный диагноз 02"},
+    {"diagnosis_id": "d3", "name": "Учебный диагноз 03"}
+  ],
+  "rules": [
+    {"mnn": "Демо-МНН-01", "diagnosis_id": "d1", "category": "А", "source": "Синтетический демо-справочник"},
+    {"mnn": "Демо-МНН-02", "diagnosis_id": "d1", "category": "Б", "source": "Синтетический демо-справочник"},
+    {"mnn": "Демо-МНН-03", "diagnosis_id": "d2", "category": "А", "source": "Синтетический демо-справочник"},
+    {"mnn": "Демо-МНН-04", "diagnosis_id": "d2", "category": "В", "source": "Синтетический демо-справочник"},
+    {"mnn": "Демо-МНН-05", "diagnosis_id": "d3", "category": "А", "source": "Синтетический демо-справочник"},
+    {"mnn": "Демо-МНН-06", "diagnosis_id": "d3", "category": "Б", "source": "Синтетический демо-справочник"}
+  ]
+}

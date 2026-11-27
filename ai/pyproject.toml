@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-rag"
+version = "0.2.0"
+description = "Библиотека проверки оснований расходов и рекомендаций сотрудникам материальной помощи"
+readme = "README.md"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.scripts]
+llm-rag = "llm_rag.__main__:main"
+llm-rag-data = "llm_rag.rag_data:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "build>=1.2,<2", "ruff>=0.11,<1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.data-files]
+"share/llm-rag/examples" = ["examples/request.json", "examples/corpus.json"]
+"share/llm-rag/data/rag" = ["data/rag/README.md", "data/rag/manifest.json"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82", "F401", "F811"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_staff_report.py" = ["F811"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+cache_dir = ".local/cache/pytest"

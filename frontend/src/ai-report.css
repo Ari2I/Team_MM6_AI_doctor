@@ -1,0 +1,51 @@
+/* Разбор ИИ использует цвета, карточки и плашки основного интерфейса. */
+.ai-panel, .ai-panel * { min-width: 0; }
+.ai-panel { display: grid; gap: 20px; border-top: 3px solid var(--brand); scroll-margin-top: 16px; }
+.ai-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.ai-title-row h3 { font-size: 1.3rem; }
+.ai-title-row .eyebrow { margin-bottom: 4px; }
+.ai-statuses, .ai-reasons, .ai-costs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ai-panel > [aria-live]:empty { display: none; }
+.ai-read-state { display: flex; align-items: center; gap: 14px; }
+.ai-report-intro { display: grid; gap: 6px; }
+.ai-panel .notice { font-size: .925rem; }
+.ai-pairs { display: grid; }
+.ai-pair { min-width: 0; border-top: 1px solid var(--border); }
+.ai-pair-summary { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 0; cursor: pointer; list-style: none; }
+.ai-pair-summary::-webkit-details-marker { display: none; }
+.ai-pair-title { display: grid; gap: 4px; overflow-wrap: anywhere; }
+.ai-pair-title > .muted { font-size: .875rem; }
+.ai-pair-badges { display: flex; align-items: center; justify-content: end; gap: 14px; flex-wrap: wrap; }
+.ai-disclosure { color: var(--brand); font-size: .875rem; white-space: nowrap; }
+.ai-pair:not([open]) .when-open, .ai-pair[open] > summary .when-closed { display: none; }
+.ai-pair-body { display: grid; gap: 20px; padding-bottom: 24px; }
+.ai-category-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ai-category { display: grid; justify-items: start; align-content: start; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: #fbfdfc; overflow-wrap: anywhere; }
+.ai-pair-explanation { display: grid; gap: 6px; overflow-wrap: anywhere; }
+.ai-pair-explanation > .muted { font-size: .875rem; }
+.ai-text-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.ai-section { display: grid; gap: 10px; }
+.ai-section h4 { color: var(--brand-dark); font-size: 1rem; }
+.ai-section ul, .ai-section ol { display: grid; gap: 10px; margin: 0; padding-left: 20px; }
+.ai-section li { overflow-wrap: anywhere; }
+.ai-why { margin-top: 6px; color: var(--muted); font-size: .875rem; }
+.ai-inline-sources { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: .8125rem; }
+.ai-sources { display: grid; gap: 12px; }
+.ai-source { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; scroll-margin-top: 20px; }
+.ai-source summary { cursor: pointer; color: var(--brand-dark); font-weight: 600; overflow-wrap: anywhere; }
+.ai-source summary small { margin-top: 4px; padding-left: 16px; font-weight: 400; }
+.ai-source .quote { margin-top: 12px; white-space: pre-wrap; }
+.ai-source-links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: .875rem; }
+.ai-report-footer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; border-top: 1px solid var(--border); padding-top: 18px; }
+.ai-costs { padding: 5px 0; }
+.ai-report-footer > p { font-size: .875rem; }
+.ai-panel p, .ai-costs strong { overflow-wrap: anywhere; }
+.ai-panel .badge, .ai-panel .chip, .ai-panel .flag { white-space: normal; }
+@media (max-width: 800px) {
+  .ai-text-grid, .ai-report-footer, .ai-category-grid { grid-template-columns: 1fr; gap: 16px; }
+  .ai-pair-summary { align-items: start; flex-direction: column; gap: 10px; }
+  .ai-pair-badges { justify-content: start; }
+}
+@media (max-width: 440px) {
+  .ai-source, .ai-category { padding: 12px; }
+}

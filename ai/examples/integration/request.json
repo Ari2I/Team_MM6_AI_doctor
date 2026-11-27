@@ -1,0 +1,15 @@
+{
+  "schema_version": "integration-request.1",
+  "request_id": "example-multiple-diagnoses",
+  "diagnoses": [
+    {"diagnosis_id": "D1", "name": "Синтетическое состояние 1"},
+    {"diagnosis_id": "D2", "name": "Синтетическое состояние 2"}
+  ],
+  "purchases": [
+    {"item_id": "P1", "name": "Неизвестное тестовое средство", "quantity": "0.5", "amount": "100.10", "currency": "RUB"}
+  ],
+  "links": [
+    {"item_id": "P1", "diagnosis_id": "D1"},
+    {"item_id": "P1", "diagnosis_id": "D2"}
+  ]
+}

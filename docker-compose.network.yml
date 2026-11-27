@@ -1,0 +1,20 @@
+# Подготовка network-образа; сетевой анализ включается отдельно через AI_MODE.
+services:
+  api:
+    build:
+      target: ai-network
+    environment:
+      AI_MODE: ${AI_MODE:-template}
+      AI_BACKEND_REVISION: ${AI_BACKEND_REVISION:?Укажите SHA backend сборки}
+      AI_LIBRARY_REVISION: ${AI_LIBRARY_REVISION:?Укажите SHA AI-библиотеки}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:?Укажите подтвержденный scope ключа}
+      RAG_DATA_DIR: /var/lib/vrach/rag
+    volumes:
+      - type: volume
+        source: rag_runtime_data
+        target: /var/lib/vrach/rag
+        volume:
+          nocopy: true
+
+volumes:
+  rag_runtime_data:
