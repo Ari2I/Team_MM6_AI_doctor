@@ -9,6 +9,29 @@ from typing import Any
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolated_ai_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Настройки рабочего Compose не выбирают путь анализа внутри unit-теста.
+
+    Тесты задают режим/ресурсы явно через AISettings или monkeypatch. Отдельный
+    RAG_TEST_DATA_DIR сохраняется: это явное разрешение проверять рабочий кэш.
+    Значения окружения не выводятся и не переносятся в тестовые артефакты.
+    """
+    for name in (
+        "AI_MODE",
+        "AI_CORPUS_PATH",
+        "AI_REGISTRY_PATH",
+        "AI_CLINICAL_CACHE_DIR",
+        "AI_LIVE_SOURCES",
+        "AI_PAIR_TIMEOUT_SECONDS",
+        "AI_APPLICATION_TIMEOUT_SECONDS",
+        "AI_CURRENCY",
+        "AI_BACKEND_REVISION",
+        "AI_LIBRARY_REVISION",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def no_network(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Запретить сетевые сокеты, DNS и соединения, включая проглоченные ошибки.

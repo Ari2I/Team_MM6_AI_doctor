@@ -8,10 +8,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.api.applications import get_session
 from app.main import app
+from app.models import ReferenceVersion
 from app.scripts.import_reference import import_reference, read_reference
 from app.services.analysis import _load_snapshot
 from app.services.matching import match_diagnosis, match_drug
@@ -76,7 +78,32 @@ def demo_client() -> Iterator[TestClient]:
         with Session(
             bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False
         ) as session:
-            version = import_reference(session, read_reference(REFERENCE), activate=True)
+            document = read_reference(REFERENCE)
+            version = session.scalar(
+                select(ReferenceVersion).where(
+                    ReferenceVersion.version == document.reference_version
+                )
+            )
+            if version is None:
+                version = import_reference(session, document, activate=True)
+            else:
+                # Пользователь мог уже загрузить demo-v2 для ручной проверки.
+                # Повторно не импортируем и не перезаписываем его содержимое.
+                assert {(row.trade_name, row.mnn) for row in version.drugs} == {
+                    (row.trade_name, row.mnn) for row in document.drugs
+                }
+                assert {(row.diagnosis_id, row.name) for row in version.diagnoses} == {
+                    (row.diagnosis_id, row.name) for row in document.diagnoses
+                }
+                assert {
+                    (row.mnn, row.diagnosis_id, row.category, row.source) for row in version.rules
+                } == {
+                    (row.mnn, row.diagnosis_id, row.category, row.source) for row in document.rules
+                }
+                session.execute(update(ReferenceVersion).values(is_active=False))
+                session.flush()
+                version.is_active = True
+                session.flush()
             session.refresh(version)
             assert version.is_active and version.is_synthetic
             assert version.version == "demo-api-2"

@@ -102,7 +102,15 @@ def test_application_roundtrip_and_database_cascade() -> None:
                 assert len(items[1].item_checks) == 2
                 assert items[1].match_confidence == 0.75
                 assert items[2].item_checks == []
-                assert connection.scalar(select(func.count()).select_from(ItemCheck)) == 4
+                item_ids = [item.id for item in items]
+                assert (
+                    connection.scalar(
+                        select(func.count())
+                        .select_from(ItemCheck)
+                        .where(ItemCheck.item_id.in_(item_ids))
+                    )
+                    == 4
+                )
 
                 session.add(ItemCheck(item_id=items[0].id, diagnosis_id=loaded.diagnoses[0].id))
                 with pytest.raises(IntegrityError):
@@ -112,7 +120,11 @@ def test_application_roundtrip_and_database_cascade() -> None:
             connection.execute(delete(Application).where(Application.id == application_id))
             for model in (ApplicationDiagnosis, ApplicationItem, ItemCheck, ValidationIssue):
                 if model is ItemCheck:
-                    count = connection.scalar(select(func.count()).select_from(model))
+                    count = connection.scalar(
+                        select(func.count())
+                        .select_from(model)
+                        .where(ItemCheck.item_id.in_(item_ids))
+                    )
                 else:
                     count = connection.scalar(
                         select(func.count())
