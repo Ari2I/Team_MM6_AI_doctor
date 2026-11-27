@@ -162,6 +162,14 @@ def test_search_normalizes_unicode_hyphen_without_changing_quote():
     assert len(fragments) == 1 and fragments[0].text == original
 
 
+def test_official_html_keeps_internal_line_breaks_and_punctuation():
+    from llm_rag.ml2.official import _Paragraphs
+    parser = _Paragraphs()
+    parser.feed("<p>Тестовое\u2011вещество —<br>  рекомендуется, при условии.</p>")
+    parser.flush()
+    assert parser.paragraphs == ["Тестовое\u2011вещество —\n  рекомендуется, при условии."]
+
+
 def test_official_reader_keeps_definitions_outside_treatment(monkeypatch):
     membership = "КДБА (сальбутамол) приведены в синтетическом перечне."
     role = "КДБА рекомендуется для лечения заболевания."
@@ -206,3 +214,21 @@ def test_oversized_group_restriction_cannot_be_hidden_by_short_mnn_mention():
     )
     with pytest.raises(EvidenceContextLimit):
         fragments_for_inn(rec, "сальбутамол")
+
+
+def test_short_group_restriction_keeps_explicit_membership_with_positive():
+    restriction = "КДБА не рекомендуется при синтетическом состоянии."
+    membership = "КДБА (сальбутамол) приведены в синтетическом перечне."
+    rec = recommendation(
+        [
+            ("definition", membership),
+            ("positive", "Сальбутамол рекомендуется для лечения заболевания."),
+            ("restriction", restriction),
+        ]
+    )
+    fragments = fragments_for_inn(rec, "сальбутамол", max_fragments=3)
+    assert {f.text for f in fragments} == {
+        membership,
+        restriction,
+        "Сальбутамол рекомендуется для лечения заболевания.",
+    }

@@ -161,6 +161,9 @@ class ClassificationDiagnostics(Model):
                    "MODEL_OMISSION", "NO_CANDIDATES", "REVIEW_REQUIRED"]
     model_assessment: Text | None = None
     assessment: Text | None = None
+    classification_reason: Text | None = None
+    model_missing_context: list[Text] = Field(default_factory=list)
+    missing_context: list[Text] = Field(default_factory=list)
     candidate_count: Annotated[int, Field(ge=0)]
     bundle_count: Annotated[int, Field(ge=0)]
     packet_count: Annotated[int, Field(ge=0)]

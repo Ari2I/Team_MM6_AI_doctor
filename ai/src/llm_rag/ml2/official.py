@@ -39,7 +39,9 @@ class _Paragraphs(HTMLParser):
         self.parts.append(data)
 
     def handle_starttag(self, tag, attrs):
-        if tag in {"p", "br", "tr", "li", "div"}:
+        if tag == "br":
+            self.parts.append("\n")
+        elif tag in {"p", "tr", "li", "div"}:
             self.flush()
 
     def handle_endtag(self, tag):
@@ -49,7 +51,7 @@ class _Paragraphs(HTMLParser):
             self.parts.append(" ")
 
     def flush(self):
-        text = " ".join("".join(self.parts).split())
+        text = "".join(self.parts).strip()
         if text:
             self.paragraphs.append(text)
         self.parts.clear()

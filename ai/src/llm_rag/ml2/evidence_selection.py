@@ -85,7 +85,18 @@ def evidence_bundles(fragments, inn, diagnosis="Selection", context=None, checkp
         elif any(p.search(name_key(fragment.text)) for p in mention_patterns):
             candidate = EvidenceBundle((fragment,), 3)
             bundles[candidate.identity] = candidate
-        for quote in _quote_options(fragment.text):
+        options = _quote_options(fragment.text)
+        # Unrelated prose cannot prove this ingredient or an explicit group.
+        if not mentions_inn:
+            options = [
+                q
+                for q in options
+                if re.search(
+                    r"(?<!\w)[А-ЯA-Z][А-ЯA-Z0-9]{2,11}(?!\w)",
+                    q,
+                )
+            ]
+        for quote in options:
             citation = Citation(
                 fragment.fragment_id,
                 fragment.source_id,
@@ -98,6 +109,29 @@ def evidence_bundles(fragments, inn, diagnosis="Selection", context=None, checkp
             )
             for rule in rules.assessments.values():
                 if not rule.category:
+                    continue
+                # Selection of restrictions does not assign a category. Reuse
+                # only the existing explicit membership/source-edition checks.
+                if rule.reject_patterns and any(
+                    re.search(p, name_key(quote), re.I) for p in rule.reject_patterns
+                ):
+                    restriction = rule.model_copy(
+                        update={
+                            "quote_patterns": rule.reject_patterns,
+                            "reject_patterns": (),
+                        }
+                    )
+                    restriction_links = _group_support(request, citation, restriction)
+                    if restriction_links:
+                        members = {fragment_key(fragment): fragment}
+                        for link in restriction_links:
+                            key = link.source_id, link.version, link.fragment_id
+                            if key not in by_identity:
+                                raise EvidenceContextLimit("GROUP_LINK_OUTSIDE_CANDIDATES")
+                            members[key] = by_identity[key]
+                        bundle = EvidenceBundle(tuple(members[k] for k in sorted(members)), 0)
+                        bundles[bundle.identity] = bundle
+                if not any(re.search(p, name_key(quote), re.I) for p in rule.quote_patterns):
                     continue
                 direct = _role_supported(inn, quote, rule)
                 linked = () if direct else _group_support(request, citation, rule)

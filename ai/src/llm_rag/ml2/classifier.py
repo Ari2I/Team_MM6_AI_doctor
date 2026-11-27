@@ -168,7 +168,10 @@ def _group_support(request: ClassificationRequest, citation: Citation, rule) -> 
         if (fragment.source_id, fragment.version, fragment.url) == (
             citation.source_id, citation.version, citation.url)
         for quote in _quote_options(fragment.text)
-        if _membership_usable(quote, rule)
+        if (_membership_usable(quote, rule)
+            and (re.search(ingredient, quote, re.I)
+                 or any(re.search(re.escape(g) + r"\s*[,()]?\s*(?:группа\s+)?(?:код\s+)?АТХ", quote, re.I)
+                        for g in groups)))
     ]
     for group in groups:
         escaped = re.escape(group)
