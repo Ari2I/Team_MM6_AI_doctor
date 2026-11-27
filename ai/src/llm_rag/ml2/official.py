@@ -103,7 +103,7 @@ class ClinicalSources:
             raise ValueError("Паспорт КР расходится с каталогом Минздрава.")
         segments = []
         for section in data["obj"]["sections"]:
-            if not re.match(r"^3(?:\.|\s)", section["title"] or "") or not section["content"]:
+            if not section["content"]:
                 continue
             parser = _Paragraphs()
             parser.feed(section["content"])

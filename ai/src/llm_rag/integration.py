@@ -27,6 +27,7 @@ from llm_rag.integration_contracts import (
 from llm_rag.integration_policy import category_decision
 from llm_rag.ml2.pipeline import ML2Pipeline
 from llm_rag.ml2.classifier import EvidenceFragment
+from llm_rag.ml2.evidence_selection import EvidenceContextLimit
 from llm_rag.ml2.registry import RegistrySnapshot, inn_key
 from llm_rag.ml2.form_matching import match_form
 from llm_rag.staff_report import recommend_for_staff
@@ -337,16 +338,7 @@ def _analyze_request(
                 )
                 for d in matching_documents
             )
-            if (
-                provider is not None
-                and approved is None
-                and (
-                    len(fragments) > 20
-                    or sum(len(f.text.encode()) for f in fragments) > options.max_context_bytes
-                )
-            ):
-                pending.append(UnprocessedPair(**identity, reason="CONTEXT_LIMIT"))
-                continue
+            similarities = {}
             if embedder is not None and fragments:
                 from llm_rag.vector_index import VectorIndex
 
@@ -360,10 +352,20 @@ def _analyze_request(
                 scores = index.similarities(
                     embedder.embed_query(f"МНН: {canonical.inn}. Диагноз: {canonical.diagnosis}.")
                 )
+                similarities = {
+                    (f.source_id, f.version, f.fragment_id): scores[fragment_key(f)]
+                    for f in fragments
+                }
                 fragments = tuple(
                     sorted(fragments, key=lambda f: (-scores[fragment_key(f)], fragment_key(f)))
                 )
             active_context = dict(context)
+            def checkpoint():
+                if resources.clock() >= budget.deadline:
+                    budget.exhausted = True
+                    from llm_rag.integration_budget import BudgetExhausted
+                    raise BudgetExhausted("Бюджет заявки исчерпан.")
+
             evaluation = pipeline.evaluate_pair(
                 request_id=request.request_id,
                 item_id=purchase.item_id,
@@ -372,6 +374,10 @@ def _analyze_request(
                 dosage=purchase.dosage,
                 context=context,
                 fragments=fragments,
+                evidence_limits={
+                    "max_context_bytes": options.max_context_bytes, "similarities": similarities,
+                    "checkpoint": checkpoint,
+                } if provider is not None and approved is None else None,
             )
             if budget.exhausted:
                 pending.append(UnprocessedPair(**identity, reason="BUDGET_EXHAUSTED"))
@@ -425,6 +431,7 @@ def _analyze_request(
                 "PROVIDER_ERROR": "AI_UNAVAILABLE",
                 "INVALID_RESPONSE": "AI_INVALID_RESPONSE",
                 "SOURCE_ERROR": "SOURCE_ERROR",
+                "CONFLICT": "CATEGORY_CONFLICT",
             }.get(result.status.value)
             reasons = last_failure["reason"] or issue or reasons
             pair = IntegrationPair(
@@ -439,11 +446,15 @@ def _analyze_request(
                 explanation=explanation,
                 form_status=form.status,
                 form_reason=form.reason,
+                classification_diagnostics=evaluation.classification_diagnostics,
             )
             if form.status == "MISMATCH":
                 pair.reasons.append("FORM_MISMATCH")
             inputs.append(inp)
             explanations.append(explanation)
+        except EvidenceContextLimit:
+            pending.append(UnprocessedPair(**identity, reason="CONTEXT_LIMIT"))
+            continue
         except Exception:
             if budget.exhausted:
                 pending.append(UnprocessedPair(**identity, reason="BUDGET_EXHAUSTED"))

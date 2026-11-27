@@ -149,6 +149,25 @@ class CategoryDecision(Model):
         return self
 
 
+class ClassificationFragmentRef(Model):
+    source_id: Text
+    version: Text
+    fragment_id: Text
+
+
+class ClassificationDiagnostics(Model):
+    schema_version: Literal["classification-diagnostics.1"] = "classification-diagnostics.1"
+    stage: Literal["PROVIDER_ERROR", "CONFLICT", "ACCEPTED", "VALIDATOR_REJECTED",
+                   "MODEL_OMISSION", "NO_CANDIDATES", "REVIEW_REQUIRED"]
+    model_assessment: Text | None = None
+    assessment: Text | None = None
+    candidate_count: Annotated[int, Field(ge=0)]
+    bundle_count: Annotated[int, Field(ge=0)]
+    packet_count: Annotated[int, Field(ge=0)]
+    retry_count: Annotated[int, Field(ge=0, le=1)]
+    fragment_refs: list[ClassificationFragmentRef] = Field(default_factory=list)
+
+
 class IntegrationPair(PairKey):
     decision: CategoryDecision
     inn: Text | None = None
@@ -163,6 +182,7 @@ class IntegrationPair(PairKey):
     generation_mode: Literal["OFFLINE", "MODEL", "FALLBACK"] = "OFFLINE"
     staff_actions: list[Text] = Field(default_factory=list)
     staff_analysis: StaffAnalysis | None = None
+    classification_diagnostics: ClassificationDiagnostics | None = None
 
 
 class UnprocessedPair(PairKey):
@@ -248,6 +268,11 @@ class IntegrationResult(Model):
         )
         diagnoses = {d.diagnosis_id: d for d in self.request.diagnoses}
         for pair in self.pairs:
+            if pair.classification_diagnostics is not None and any(
+                (ref.source_id, ref.fragment_id, ref.version) not in docs
+                for ref in pair.classification_diagnostics.fragment_refs
+            ):
+                raise ValueError("Диагностика ссылается на отсутствующий фрагмент снимка.")
             if pair.policy_version is not None and (
                 self.manifest.policy is None or pair.policy_version != self.manifest.policy.version
             ):

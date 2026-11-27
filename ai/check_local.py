@@ -20,7 +20,7 @@ def check_card(source: Path, output: Path) -> int:
         print(f"{source.name}: ошибка чтения XLSX ({type(error).__name__}).", file=sys.stderr)
         return 2
     try:
-        result = analyze_request(request, verify_ssl_certs=False)
+        result = analyze_request(request, verify_ssl_certs=True)
         write_integration_report(result, output)
     except (ValueError, OSError, httpx.HTTPError) as error:
         print(

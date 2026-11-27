@@ -23,7 +23,6 @@ from urllib.robotparser import RobotFileParser
 import httpx
 
 from .classifier import EvidenceFragment
-from .registry import inn_key
 from llm_rag.rag_data import default_data_dir
 
 BASE_URL = "https://xn--80ahcaaarabfanddhyjjq1br6ji.xn--p1ai"
@@ -719,74 +718,26 @@ def fragments_for_inn(
     max_fragments: int = 20,
     window_chars: int = 3000,
 ) -> tuple[EvidenceFragment, ...]:
-    """Вернуть первые max_fragments окон по МНН, без обрезания предложений.
+    """Select complete linked evidence before applying the legacy output quota.
 
-    Поиск ограничен первыми 20 окнами: это подбор материалов для сверки,
-    а не доказательство полноты рекомендаций или отсутствия противопоказаний.
+    The network facade retains all candidates and applies model limits later.
     """
+    from .evidence_selection import evidence_bundles, rank_bundles
 
-    if not recommendation.is_current_ministry_copy:
-        return ()
-    if not 1 <= max_fragments <= 20 or not 200 <= window_chars <= 3000:
-        raise ValueError("Лимит фрагментов или контекста вне допустимого диапазона.")
-    tokens = re.findall(r"[a-zа-яё0-9-]+", inn_key(inn))
-    patterns = [
-        re.compile(r"(?<!\w)" + re.escape(token) + r"[а-яё]{0,4}(?!\w)", re.IGNORECASE)
-        for token in tokens
-        if len(token) >= 4
-    ]
-    if not patterns:
-        return ()
+    if not 1 <= max_fragments <= 20:
+        raise ValueError("Лимит фрагментов вне допустимого диапазона.")
+    candidates = collect_fragments_for_inn(recommendation, inn, window_chars=window_chars)
+    bundles = rank_bundles(evidence_bundles(candidates, inn, recommendation.title))
+    selected = {}
+    for bundle in bundles:
+        addition = {f.fragment_id: f for f in bundle.fragments}
+        if len(selected | addition) <= max_fragments:
+            selected.update(addition)
+    return tuple(selected.values())
 
-    source_id = sha256(
-        f"{recommendation.primary_url}\0{recommendation.version}".encode()
-    ).hexdigest()[:24]
-    found: list[EvidenceFragment] = []
-    seen: set[str] = set()
-    for segment in recommendation.segments:
-        searchable = segment.text.replace("ё", "е").replace("Ё", "Е")
-        # Не вырезаем начало предложения с отрицанием или условием и не
-        # объединяем цепочку упоминаний в неограниченный раздел лечения.
-        sentences = [(m.start(), m.end()) for m in re.finditer(
-            r'\S.*?(?:[.!?](?=\s|$)|$)', searchable, re.DOTALL)]
-        windows = []
-        for index, (start, end) in enumerate(sentences):
-            if not any(p.search(searchable[start:end]) for p in patterns):
-                continue
-            if end - start > window_chars:
-                # Длинное предложение целиком не помещается: обрезанная
-                # медицинская формулировка не используется как основание.
-                raise ClinicalSourceError('Предложение с МНН превышает предел безопасного контекста; требуется ручная сверка источника.')
-            left, right = index, index
-            while left > 0 and end - sentences[left - 1][0] <= window_chars:
-                left -= 1
-                start = sentences[left][0]
-            while right + 1 < len(sentences) and sentences[right + 1][1] - start <= window_chars:
-                right += 1
-                end = sentences[right][1]
-            windows.append((start, end))
-        for start, end in windows:
-            if len(found) >= max_fragments:
-                # Квота ограничивает выдачу, но оставшиеся сегменты всё равно
-                # проверяются: нельзя скрыть длинное противопоказание за квотой.
-                break
-            quote = segment.text[start:end].strip()
-            fragment_id = sha256(
-                f"{recommendation.primary_url}\0{segment.locator}\0{start}\0{quote}".encode()
-            ).hexdigest()[:24]
-            if fragment_id in seen:
-                continue
-            seen.add(fragment_id)
-            found.append(
-                EvidenceFragment(
-                    fragment_id=fragment_id,
-                    source_id=source_id,
-                    title=recommendation.title,
-                    version=recommendation.version,
-                    url=recommendation.primary_url,
-                    location=segment.locator,
-                    text=quote,
-                    copy_url=recommendation.page_url,
-                )
-            )
-    return tuple(found)
+
+def collect_fragments_for_inn(recommendation, inn, *, window_chars=900, checkpoint=None):
+    """All direct/group candidate evidence; no early model-context quota."""
+    from .evidence_selection import candidate_fragments
+
+    return candidate_fragments(recommendation, inn, window_chars=window_chars, checkpoint=checkpoint)

@@ -34,6 +34,7 @@ class ItemEvaluation:
     rule_applied: bool = False
     candidates: tuple[CatalogCandidate, ...] = ()
     recommendation: Mapping[str, str] | None = None
+    classification_diagnostics: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -175,7 +176,7 @@ class ML2Pipeline:
         )
 
     def evaluate_pair(self, *, request_id, item_id, diagnosis, trade_name,
-                      dosage=None, context=None, fragments=()):
+                      dosage=None, context=None, fragments=(), evidence_limits=None):
         """Обработать узкую пару без искусственных денег и количества.
 
         Только переданные фрагменты; сетевые загрузки этим методом запрещены.
@@ -186,6 +187,18 @@ class ML2Pipeline:
                                   context=dict(context or {}))
         item = SimpleNamespace(item_id=item_id, original=SimpleNamespace(
             trade_name=trade_name, dosage=dosage or ''))
+        if evidence_limits is not None and self.complete is not None and fragments:
+            from .evidence_evaluation import evaluate_packets
+
+            inn = self.index.resolve(trade_name, dosage or '').mnn
+            if inn and '+' not in inn:
+                return evaluate_packets(
+                    fragments=tuple(fragments), inn=inn, diagnosis=diagnosis,
+                    context=dict(context or {}), limits=evidence_limits, complete=self.complete,
+                    evaluate=lambda packet, retry: self._evaluate(
+                        request, item, _code(request, None), {},
+                        fragments_override=packet, complete_override=retry),
+                )
         return self._evaluate(request, item, _code(request, None), {},
                               fragments_override=tuple(fragments))
 
@@ -207,7 +220,7 @@ class ML2Pipeline:
             review_reason=reason,
         )
 
-    def _evaluate(self, request, item, code, catalog_cache, *, fragments_override=None):
+    def _evaluate(self, request, item, code, catalog_cache, *, fragments_override=None, complete_override=None):
         drug = self.index.resolve(item.original.trade_name, item.original.dosage)
         registry = tuple(
             Citation(
@@ -322,7 +335,7 @@ class ML2Pipeline:
                     tuple(fragments),
                     context,
                 ),
-                self.complete,
+                complete_override or self.complete,
             )
             if original_ids:
                 result=replace(result,citations=tuple(replace(c,fragment_id=original_ids.get(

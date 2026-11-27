@@ -115,7 +115,8 @@ def _role_supported(inn: str, quote: str, rule) -> bool:
     ingredient = re.escape(inn_key(inn)).replace(r"\ ", r"\s+")
     clauses = re.split(r"[.;!?\n]", quote) if rule.same_clause_inn else [quote]
     for clause in clauses:
-        clause = clause.casefold().replace("ё", "е")
+        from .registry import name_key
+        clause = name_key(clause)
         if rule.same_clause_inn and not re.search(
             r"(?<!\w)" + ingredient + r"[а-я]{0,3}(?!\w)", clause
         ):
@@ -156,6 +157,11 @@ def _group_support(request: ClassificationRequest, citation: Citation, rule) -> 
     """
     ingredient = re.escape(inn_key(request.inn)).replace(r"\ ", r"\s+")
     ingredient = r"(?<!\w)" + ingredient + r"[а-я]{0,3}(?!\w)"
+    groups = [group for group in re.findall(
+        r"(?<!\w)[А-ЯA-Z][А-ЯA-Z0-9]{2,11}(?!\w)", citation.quote
+    ) if _role_supported(group, citation.quote, rule)]
+    if not groups:
+        return ()
     source_quotes = [
         (fragment, quote)
         for fragment in request.fragments
@@ -164,10 +170,7 @@ def _group_support(request: ClassificationRequest, citation: Citation, rule) -> 
         for quote in _quote_options(fragment.text)
         if _membership_usable(quote, rule)
     ]
-    groups = re.findall(r"(?<!\w)[А-ЯA-Z][А-ЯA-Z0-9]{2,11}(?!\w)", citation.quote)
     for group in groups:
-        if not _role_supported(group, citation.quote, rule):
-            continue
         escaped = re.escape(group)
         for fragment, quote in source_quotes:
             normalized = quote.casefold().replace("ё", "е")

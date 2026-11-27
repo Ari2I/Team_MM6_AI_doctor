@@ -15,7 +15,7 @@ from llm_rag.embeddings import corpus_embedder
 from llm_rag.evidence_snapshot import EvidenceDocument, EvidenceSnapshot
 from llm_rag.integration import IntegrationResources
 from llm_rag.integration_budget import source_timeout
-from llm_rag.ml2.clinicalrecs import fragments_for_inn
+from llm_rag.ml2.clinicalrecs import collect_fragments_for_inn
 from llm_rag.ml2.grls import download_latest, build_registry_snapshot
 from llm_rag.ml2.official import ClinicalSources, SelectionError, select_edition
 from llm_rag.ml2.provider import ML2GigaChatProvider
@@ -70,7 +70,9 @@ def _clinical(request, registry, sources, deadline, links, *, diagnosis_aliases=
                 required["recommendation_edition"] = diagnosis.recommendation_edition
             if rec.population in {"Дети", "Взрослые"}:
                 required["age_group"] = rec.population
-            for fragment in fragments_for_inn(rec, inn, max_fragments=8, window_chars=1600):
+            for fragment in collect_fragments_for_inn(
+                rec, inn, checkpoint=lambda: source_timeout(deadline, 1.0),
+            ):
                 # Один фрагмент может относиться к нескольким МНН и диагнозам заявки.
                 identity = (
                     fragment.fragment_id,

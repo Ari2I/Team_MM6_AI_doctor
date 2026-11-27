@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 def name_key(value: str) -> str:
     value = unicodedata.normalize("NFKC", value.replace("®", "").replace("™", ""))
+    value = value.translate(str.maketrans({c: "-" for c in "‐‑‒–—−"}))
     return " ".join(value.casefold().replace("ё", "е").split())
 
 

@@ -38,7 +38,7 @@ def test_local_and_backend_share_request_and_result(monkeypatch, tmp_path, path)
     assert saved["pairs"] == direct.model_dump(mode="json")["pairs"]
     assert (tmp_path / "report.html").read_text(encoding="utf8") == render_human_report(saved["human_report"])
     assert calls[0][0] == calls[1][0]
-    assert calls[0][1] is True and calls[1][1] is False
+    assert calls[0][1] is True and calls[1][1] is True
     assert calls[0][2] == calls[1][2]
 
 
@@ -73,7 +73,7 @@ def test_default_batch_checks_all_cards_even_after_invalid_input(monkeypatch, tm
     monkeypatch.setattr(ReadOnlyWorksheet, "iter_rows", fail_once)
 
     def prepare(request, verify_ssl_certs, options, start):
-        assert verify_ssl_certs is False
+        assert verify_ssl_certs is True
         return IntegrationResources()
 
     monkeypatch.setattr("llm_rag.runtime.prepare_resources", prepare)
