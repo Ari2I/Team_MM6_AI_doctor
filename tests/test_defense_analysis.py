@@ -59,6 +59,42 @@ def test_disabling_reference_cannot_enable_network_in_local_modes(mode):
     assert AISettings(mode=mode).use_backend_reference
 
 
+def test_failed_old_transaction_cannot_clear_a_newer_completed_run(defense_settings, monkeypatch):
+    from uuid import uuid4
+
+    application = make_application()
+    session = IntegrationSession(application)
+    winner_run = uuid4()
+    original_commit = session.commit
+    attempts = []
+
+    def commit():
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise RuntimeError("Synthetic transaction failure")
+        original_commit()
+
+    def rollback():
+        # Simulate another serialized analysis completing after rollback releases
+        # this transaction's row lock, before the error handler acquires it again.
+        application.analysis_run_id = winner_run
+        application.status = "analyzed"
+        application.warning_message = "Newer saved result"
+
+    session.commit = commit
+    session.rollback = rollback
+    monkeypatch.setattr(
+        application_ai.IntegrationWorkerClient,
+        "analyze",
+        lambda *_: IntegrationReply(
+            request_id=application.id, outcome="result", result=defense_result(application)
+        ),
+    )
+    result = analysis.analyze_application(session, application.id)
+    assert result.analysis_run_id == winner_run
+    assert result.status == "analyzed" and result.warning_message == "Newer saved result"
+
+
 def test_diagnosis_conflict_keeps_verbatim_quote_at_end():
     quote = "Синтетическая дословная цитата: TEST_EVIDENCE."
     checks = detect_conflicts(

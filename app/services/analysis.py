@@ -97,6 +97,8 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
     if application is None:
         raise AnalysisError("Заявка не найдена.")
     settings: AISettings | None = None
+    previous_run_id: UUID | None = None
+    lock_acquired = False
     try:
         settings = AISettings()
         ai_adapter = AIAdapter() if settings.use_backend_reference else None
@@ -104,9 +106,16 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
             settings = ai_adapter.settings
         # Как в save_ai_result: сначала заявка, затем её снимок. Блокировка
         # удерживается до общего commit карточки и AI-отчёта.
-        session.execute(
-            select(Application.id).where(Application.id == application.id).with_for_update()
+        locked = session.execute(
+            select(Application)
+            .where(Application.id == application.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        if locked is not None:
+            application = locked.scalar_one()
+        previous_run_id = application.analysis_run_id
+        lock_acquired = True
         application.analysis_run_id = uuid4()
         snapshot = _load_snapshot(session) if settings.use_backend_reference else None
         items = list(application.items)
@@ -241,6 +250,19 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
         application = session.get(Application, application_id)
         if application is None:
             raise AnalysisError("Заявка не найдена.") from None
+        locked = session.execute(
+            select(Application)
+            .where(Application.id == application.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if locked is not None:
+            application = locked.scalar_one()
+        if lock_acquired and application.analysis_run_id != previous_run_id:
+            # После rollback другой запуск успел завершиться. Не очищать его
+            # актуальные проверки и отчёт ошибкой более старого анализа.
+            session.commit()
+            return application
         return _set_error(
             session,
             application,
