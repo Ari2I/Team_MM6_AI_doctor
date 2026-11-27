@@ -125,6 +125,7 @@ def candidate_fragments(recommendation, inn, *, window_chars=900, checkpoint=Non
     source_id = sha256(f"{recommendation.primary_url}\0{recommendation.version}".encode()).hexdigest()[:24]
     candidates = {}
     seen_text = {}
+    rules = load_classification_rules()
     for segment in recommendation.segments:
         if checkpoint:
             checkpoint()
@@ -133,8 +134,15 @@ def candidate_fragments(recommendation, inn, *, window_chars=900, checkpoint=Non
             sentence = segment.text[start:end]
             if end - start > window_chars:
                 # Long relevant evidence must not be hidden by a quota or cut.
-                if _inn_pattern(inn).search(name_key(sentence)) or any(
-                    p.search(name_key(sentence)) for p in _mention_patterns(inn)
+                group_role = bool(re.search(r"(?<!\w)[А-ЯA-Z][А-ЯA-Z0-9]{2,11}(?!\w)", sentence)) and any(
+                    re.search(p, name_key(sentence), re.I)
+                    for rule in rules.assessments.values()
+                    for p in (*rule.quote_patterns, *rule.reject_patterns)
+                )
+                if (
+                    _inn_pattern(inn).search(name_key(sentence))
+                    or any(p.search(name_key(sentence)) for p in _mention_patterns(inn))
+                    or group_role
                 ):
                     raise EvidenceContextLimit("Релевантное предложение превышает предел контекста.")
                 continue

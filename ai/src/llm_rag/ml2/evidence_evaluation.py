@@ -152,7 +152,7 @@ def evaluate_packets(*, fragments, inn, diagnosis, context, limits, evaluate, co
         "assessment": merged.assessment.value if merged.assessment else None,
         "candidate_count": len(fragments),
         "bundle_count": len(bundles),
-        "packet_count": len(packets),
+        "packet_count": len(packets) if fragments else 0,
         "retry_count": retries,
         "fragment_refs": [
             dict(source_id=k[0], version=k[1], fragment_id=k[2])

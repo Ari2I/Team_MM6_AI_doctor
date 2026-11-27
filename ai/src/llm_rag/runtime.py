@@ -16,6 +16,7 @@ from llm_rag.evidence_snapshot import EvidenceDocument, EvidenceSnapshot
 from llm_rag.integration import IntegrationResources
 from llm_rag.integration_budget import source_timeout
 from llm_rag.ml2.clinicalrecs import collect_fragments_for_inn
+from llm_rag.ml2.evidence_selection import EvidenceContextLimit
 from llm_rag.ml2.grls import download_latest, build_registry_snapshot
 from llm_rag.ml2.official import ClinicalSources, SelectionError, select_edition
 from llm_rag.ml2.provider import ML2GigaChatProvider
@@ -91,6 +92,8 @@ def _clinical(request, registry, sources, deadline, links, *, diagnosis_aliases=
                 )
         except SelectionError as error:
             issues[key] = error.status
+        except EvidenceContextLimit:
+            issues[key] = "CONTEXT_LIMIT"
         except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError):
             issues[key] = "SOURCE_ERROR"
 

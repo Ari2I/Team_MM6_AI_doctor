@@ -288,6 +288,9 @@ def _analyze_request(
             resolved = pipeline.index.resolve(purchase.name, purchase.dosage or "")
             form = match_form(purchase.dosage, [r.form for r in resolved.registrations])
             issue = (resources.source_issues or {}).get((purchase.item_id, diagnosis.diagnosis_id))
+            if issue == "CONTEXT_LIMIT":
+                pending.append(UnprocessedPair(**identity, reason="CONTEXT_LIMIT"))
+                continue
             if issue in {"DIAGNOSIS_MISMATCH", "NEEDS_CONTEXT", "NEEDS_REVIEW"}:
                 # Применимость редакции проверяется до вызова модели и правил корпуса.
                 pairs.append(

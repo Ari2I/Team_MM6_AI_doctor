@@ -13,6 +13,7 @@ from llm_rag.ml2.clinicalrecs import (
     fragments_for_inn,
 )
 from llm_rag.ml2.official import ClinicalSources
+from llm_rag.ml2.evidence_selection import EvidenceContextLimit
 
 
 @pytest.fixture(autouse=True)
@@ -194,3 +195,14 @@ def test_official_reader_keeps_definitions_outside_treatment(monkeypatch):
     assert any(segment.text == membership and segment.locator.startswith("1.") for segment in rec.segments)
     fragments = fragments_for_inn(rec, "сальбутамол", max_fragments=8, window_chars=1600)
     assert any(role in fragment.text for fragment in fragments)
+
+
+def test_oversized_group_restriction_cannot_be_hidden_by_short_mnn_mention():
+    rec = recommendation(
+        [
+            ("definition", "КДБА (сальбутамол) приведены в синтетическом перечне."),
+            ("restriction", "КДБА не рекомендуется при " + "а" * 4000 + "."),
+        ]
+    )
+    with pytest.raises(EvidenceContextLimit):
+        fragments_for_inn(rec, "сальбутамол")

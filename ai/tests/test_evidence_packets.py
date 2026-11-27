@@ -122,6 +122,22 @@ def test_old_result_without_diagnostics_is_still_readable():
     assert IntegrationResult.model_validate(value).pairs[0].classification_diagnostics is None
 
 
+def test_source_context_limit_is_pending_before_any_model_call():
+    client = PacketClient()
+    local = replace(resources(client), source_issues={("P", "D0"): "CONTEXT_LIMIT"})
+    result = _run(model_request(), resources=local)
+    assert not result.pairs and client.calls == 0
+    assert result.unprocessed_pairs[0].reason == "CONTEXT_LIMIT"
+
+
+def test_no_candidates_have_explicit_diagnostics_without_classification_call():
+    client = PacketClient()
+    local = replace(resources(client), evidence=EvidenceSnapshot(snapshot_version="none"))
+    result = _run(model_request(), resources=local)
+    assert not client.payloads
+    assert result.pairs[0].classification_diagnostics.stage == "NO_CANDIDATES"
+
+
 def test_one_retry_uses_actual_conditions_without_forcing_assessment():
     result, client = run_packets(
         [

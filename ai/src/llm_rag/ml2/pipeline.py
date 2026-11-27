@@ -187,7 +187,7 @@ class ML2Pipeline:
                                   context=dict(context or {}))
         item = SimpleNamespace(item_id=item_id, original=SimpleNamespace(
             trade_name=trade_name, dosage=dosage or ''))
-        if evidence_limits is not None and self.complete is not None and fragments:
+        if evidence_limits is not None and self.complete is not None:
             from .evidence_evaluation import evaluate_packets
 
             inn = self.index.resolve(trade_name, dosage or '').mnn
