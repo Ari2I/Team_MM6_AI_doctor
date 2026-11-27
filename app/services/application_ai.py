@@ -22,10 +22,15 @@ class ApplicationAI:
 
     pairs: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     error: ReviewReason | None = None
+    result: dict[str, Any] | None = None
+    report_rows: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
 
 
 def analyze_network_application(
-    session: Session, application: Application, settings: AISettings, snapshot: ReferenceSnapshot
+    session: Session,
+    application: Application,
+    settings: AISettings,
+    snapshot: ReferenceSnapshot | None,
 ) -> ApplicationAI:
     """Сохранить только полностью возвращённый результат; commit делает оркестратор."""
     if not settings.backend_revision or not settings.library_revision:
@@ -48,12 +53,18 @@ def analyze_network_application(
                 backend_revision=settings.backend_revision,
                 ai_revision=settings.library_revision,
                 snapshot=snapshot,
+                use_backend_reference=settings.use_backend_reference,
             )
             result = stored.result
             pairs = {(pair["item_id"], pair["diagnosis_id"]): pair for pair in result["pairs"]}
             for pair in result["unprocessed_pairs"]:
                 pairs[pair["item_id"], pair["diagnosis_id"]] = pair
-            return ApplicationAI(pairs=pairs)
+            rows = {row["number"]: row for row in result["human_report"]["items"]}
+            report_rows = {
+                (check["item_id"], check["diagnosis_id"]): rows[check["number"]]
+                for check in stored.checks
+            }
+            return ApplicationAI(pairs=pairs, result=result, report_rows=report_rows)
     except IntegrationMappingError as error:
         return ApplicationAI(error=error.review_reason)
     except (AIReportError, ValueError, TypeError, KeyError):
@@ -146,6 +157,82 @@ def resolved_inn(outcome: ApplicationAI, item_id: str) -> str | None:
         if identity == item_id and pair.get("inn")
     }
     return next(iter(values)) if len(values) == 1 and outcome.error is None else None
+
+
+def project_ai_pair(outcome: ApplicationAI, item_id: str, diagnosis_id: str) -> PairCheck:
+    """Карточка сборки защиты: только решение фасада, без SQL и попарного AI."""
+    pair = outcome.pairs.get((item_id, diagnosis_id))
+    if outcome.error or pair is None or outcome.result is None:
+        reason = outcome.error or ReviewReason.AI_INVALID_RESPONSE
+        return PairCheck(
+            source="ИИ-анализ: результат не получен.",
+            comment=REVIEW_REASON_LABELS[reason],
+            needs_review=True,
+            review_reason=reason,
+        )
+
+    processed = "decision" in pair
+    decision = pair.get("decision", {})
+    reason = _failure_reason(pair["reasons"] if processed else [pair["reason"]])
+    conflict = decision.get("classification_basis") == "CONFLICT"
+    proposed = decision.get("upstream_rule_category") or decision.get("proposed_category")
+    # Источник категории — decision фасада. Ошибка генерации пояснения сама
+    # по себе не отменяет его классификацию; причина сбоя остаётся видимой.
+    category = DrugCategory(proposed) if proposed and not conflict else None
+    if (
+        category
+        and not decision.get("upstream_rule_category")
+        and reason == ReviewReason.AI_REVIEW_REQUIRED
+    ):
+        reason = ReviewReason.AI_PRELIMINARY
+
+    # Версии берём из общего manifest; они одинаковы для всех пар заявки.
+    manifest = outcome.result["manifest"]
+    versions = [
+        ("grls:" if name == "registry" else name + ":") + descriptor["version"]
+        for name in ("registry", "clinical", "corpus", "policy")
+        if (descriptor := manifest.get(name)) is not None
+    ]
+    citations = pair.get("citations", [])
+    source = "ИИ-анализ: " + (
+        "; ".join(
+            str(citation[key])
+            for citation in citations[:1]
+            for key in ("title", "version", "location", "url")
+            if citation.get(key)
+        )
+        if citations
+        else "подтверждённая цитата отсутствует."
+    )
+    row = outcome.report_rows.get((item_id, diagnosis_id), {})
+    comments = [row.get("comment"), REVIEW_REASON_LABELS[reason]]
+    # Краткое представление до подключения полного экрана: пояснение, первые
+    # вывод/неопределённость/вопрос. Все остальные элементы остаются в AI-отчёте.
+    for section in ("established", "uncertain", "questions"):
+        if statements := row.get(section):
+            comments.append(statements[0]["text"])
+    if conflict:
+        comments.append("Основания ИИ дают разные категории; требуется сверка источников.")
+    if not processed:
+        comments.append("Пара не обработана; категория не определена.")
+    if processed and pair["form_status"] == "MISMATCH":
+        comments.append(
+            "Обнаружено расхождение формы или концентрации. Сверьте препарат с источником; "
+            "это отдельное предупреждение, оно не меняет категорию."
+        )
+    comment = " ".join(dict.fromkeys(part for part in comments if part))
+    if citations:
+        # Уже проверена IntegrationResult по сохранённому снимку. Не пересказываем
+        # цитату: существующий frontend выделяет её по этому маркеру.
+        comment += " Цитата: " + citations[0]["quote"]
+    return PairCheck(
+        category=category,
+        source=source,
+        reference_version="; ".join(versions) or None,
+        comment=comment,
+        needs_review=True,
+        review_reason=reason,
+    )
 
 
 def _failure_reason(reasons: list[str]) -> ReviewReason:

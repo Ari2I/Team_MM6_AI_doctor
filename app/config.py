@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -170,6 +170,8 @@ class AISettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AI_", extra="ignore")
 
     mode: Literal["template", "offline", "network"] = "template"
+    # В сборке защиты карточка строится только из результата сетевого фасада.
+    use_backend_reference: bool = True
     pair_timeout_seconds: float = Field(default=20, gt=0, allow_inf_nan=False)
     application_timeout_seconds: float = Field(default=90, gt=0, allow_inf_nan=False)
     # Optional legacy RAG corpus; ordinary analysis uses the active reference.
@@ -183,6 +185,12 @@ class AISettings(BaseSettings):
     # Метаданные проверенной сборки; пустые значения не разрешают network-запуск.
     backend_revision: str = Field(default="", pattern=r"^(?:[0-9a-f]{40})?$")
     library_revision: str = Field(default="", pattern=r"^(?:[0-9a-f]{40})?$")
+
+    @model_validator(mode="after")
+    def validate_analysis_source(self) -> "AISettings":
+        if not self.use_backend_reference and self.mode != "network":
+            raise ValueError("Отключение backend-справочника требует режима network.")
+        return self
 
 
 class AINetworkSettings(BaseSettings):

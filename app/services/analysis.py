@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.config import AISettings
 from app.models import (
     Application,
     ApplicationAIResult,
@@ -17,7 +18,12 @@ from app.models import (
 )
 from app.schemas.analysis import ReferenceDiagnosis, ReferenceDrug, ReferenceRule, ReferenceSnapshot
 from app.services.ai_adapter import AIAdapter, AIInput
-from app.services.application_ai import analyze_network_application, project_pair, resolved_inn
+from app.services.application_ai import (
+    analyze_network_application,
+    project_ai_pair,
+    project_pair,
+    resolved_inn,
+)
 from app.services.matching import match_diagnosis, match_drug
 from app.services.rules import check_pair, detect_conflicts, pairs_for_item
 from app.services.summary import (
@@ -57,10 +63,23 @@ def _load_snapshot(session: Session) -> ReferenceSnapshot:
     )
 
 
-def _set_error(session: Session, application: Application) -> Application:
+def _set_error(
+    session: Session, application: Application, *, clear_checks: bool = False
+) -> Application:
     session.execute(
         delete(ApplicationAIResult).where(ApplicationAIResult.application_id == application.id)
     )
+    if clear_checks:
+        items = list(application.items)
+        if items:
+            session.execute(delete(ItemCheck).where(ItemCheck.item_id.in_([i.id for i in items])))
+        for item in items:
+            item.mnn = None
+            item.match_confidence = None
+            item.match_note = None
+        application.category_shares = None
+        application.traffic_light = None
+        application.summary = None
     application.status = ApplicationStatus.ERROR
     application.requires_review = True
     application.warning_message = "Анализ не завершён: требуется проверка человеком."
@@ -73,14 +92,18 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
     application = session.get(Application, application_id)
     if application is None:
         raise AnalysisError("Заявка не найдена.")
+    settings: AISettings | None = None
     try:
-        ai_adapter = AIAdapter()
+        settings = AISettings()
+        ai_adapter = AIAdapter() if settings.use_backend_reference else None
+        if ai_adapter is not None:
+            settings = ai_adapter.settings
         # Как в save_ai_result: сначала заявка, затем её снимок. Блокировка
         # удерживается до общего commit карточки и AI-отчёта.
         session.execute(
             select(Application.id).where(Application.id == application.id).with_for_update()
         )
-        snapshot = _load_snapshot(session)
+        snapshot = _load_snapshot(session) if settings.use_backend_reference else None
         diagnoses = list(application.diagnoses)
         diagnosis_names = [diagnosis.name for diagnosis in diagnoses]
         items = list(application.items)
@@ -96,24 +119,30 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
         session.flush()
 
         network = None
-        if ai_adapter.settings.mode == "network":
+        if settings.mode == "network":
             for item in items:
-                matched = match_drug(item.drug_name or "", snapshot)
-                item.mnn = matched.mnn
-                item.match_confidence = matched.confidence
-                item.match_note = matched.status
+                if snapshot is not None:
+                    matched = match_drug(item.drug_name or "", snapshot)
+                    item.mnn = matched.mnn
+                    item.match_confidence = matched.confidence
+                    item.match_note = matched.status
+                else:
+                    # Прежнее сопоставление (в том числе demo-api-2) не должно
+                    # стать входом нового фасада при повторном анализе.
+                    item.mnn = None
+                    item.match_confidence = None
+                    item.match_note = None
             session.flush()
-            network = analyze_network_application(
-                session, application, ai_adapter.settings, snapshot
-            )
+            network = analyze_network_application(session, application, settings, snapshot)
 
         all_checks: list[ItemCheck] = []
         item_best: list[dict[str, object]] = []
         for item in items:
-            drug_match = match_drug(item.drug_name or "", snapshot)
-            item.mnn = drug_match.mnn
-            item.match_confidence = drug_match.confidence
-            item.match_note = drug_match.status
+            drug_match = match_drug(item.drug_name or "", snapshot) if snapshot else None
+            if drug_match is not None:
+                item.mnn = drug_match.mnn
+                item.match_confidence = drug_match.confidence
+                item.match_note = drug_match.status
             if network is not None and not item.mnn:
                 if inn := resolved_inn(network, str(item.id)):
                     item.mnn = inn
@@ -126,13 +155,19 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
                 diagnosis_row = next((row for row in diagnoses if row.name == diagnosis_name), None)
                 if diagnosis_row is None:
                     continue
-                diagnosis_match = match_diagnosis(diagnosis_name, snapshot)
-                pair_check = check_pair(drug_match, diagnosis_match, snapshot)
-                if network is not None:
+                if snapshot is None:
+                    assert network is not None
+                    pair_check = project_ai_pair(network, str(item.id), str(diagnosis_row.id))
+                else:
+                    assert drug_match is not None
+                    diagnosis_match = match_diagnosis(diagnosis_name, snapshot)
+                    pair_check = check_pair(drug_match, diagnosis_match, snapshot)
+                if snapshot is not None and network is not None:
                     pair_check = project_pair(
                         pair_check, network, str(item.id), str(diagnosis_row.id)
                     )
-                else:
+                elif network is None:
+                    assert ai_adapter is not None and drug_match is not None
                     pair_check = ai_adapter.analyze(
                         AIInput(
                             drug_name=item.drug_name or "",
@@ -145,7 +180,7 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
                         ),
                         pair_check,
                     )
-                if ai_adapter.last_mnn and not drug_match.mnn:
+                if ai_adapter is not None and ai_adapter.last_mnn and not drug_match.mnn:
                     item.mnn = ai_adapter.last_mnn
                     item.match_note = "matched_grls"
                     item.match_confidence = 1.0
@@ -182,8 +217,9 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
         application.requires_review = has_review
         application.warning_message = build_warning_message(all_checks)
         if (
-            snapshot.reference_version == "unconfigured"
-            and not ai_adapter.settings.registry_path
+            snapshot is not None
+            and snapshot.reference_version == "unconfigured"
+            and not settings.registry_path
             and network is None
         ):
             application.warning_message = (
@@ -191,6 +227,11 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
                 "требуется проверка человеком."
             )
         application.summary = build_summary(shares, decision.color, has_review)
+        if not settings.use_backend_reference and network is not None and network.result:
+            human_report = network.result["human_report"]
+            application.summary = " ".join(
+                [human_report["summary"], human_report["recommendation_note"], application.summary]
+            )
         application.status = ApplicationStatus.ANALYZED
         session.commit()
         return application
@@ -199,4 +240,8 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
         application = session.get(Application, application_id)
         if application is None:
             raise AnalysisError("Заявка не найдена.") from None
-        return _set_error(session, application)
+        return _set_error(
+            session,
+            application,
+            clear_checks=settings is not None and not settings.use_backend_reference,
+        )

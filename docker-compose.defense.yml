@@ -1,0 +1,9 @@
+# Сборка защиты: только результат фасада; без категорий backend-справочника.
+# Применять после docker-compose.network.yml и docker-compose.certs.yml.
+services:
+  api:
+    build:
+      target: ai-network
+    environment:
+      AI_MODE: network
+      AI_USE_BACKEND_REFERENCE: "false"

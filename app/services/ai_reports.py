@@ -12,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Application, ApplicationAIResult
+from app.models.enums import ReviewReason
 from app.schemas.ai_report import AIReport, AIReportCheck
-from app.schemas.analysis import ReferenceSnapshot
+from app.schemas.analysis import PairCheck, ReferenceSnapshot
 from app.services.integration_mapping import IntegrationMappingError, prepare_integration_request
 from app.services.matching import match_diagnosis, match_drug
 from app.services.rules import check_pair
@@ -63,8 +64,19 @@ def _same_request(application: Application, result: dict[str, Any], currency: st
         raise AIReportError()
 
 
+def disabled_backend_check() -> PairCheck:
+    """Отсутствие SQL-проверки явно отражается в сохранённом AI-отчёте."""
+    return PairCheck(
+        source="Проверка по справочнику backend отключена.",
+        needs_review=True,
+        review_reason=ReviewReason.AI_REVIEW_REQUIRED,
+    )
+
+
 def result_checks(
-    application: Application, result: dict[str, Any], snapshot: ReferenceSnapshot
+    application: Application,
+    result: dict[str, Any],
+    snapshot: ReferenceSnapshot | None,
 ) -> list[AIReportCheck]:
     """Проекция уже валидного результата. Порядок строк закреплён human-report.1."""
     items = {str(row.id): row for row in application.items}
@@ -75,10 +87,14 @@ def result_checks(
     for number, (pair, processed) in enumerate(pairs, 1):
         item = items[pair["item_id"]]
         diagnosis = diagnoses[pair["diagnosis_id"]]
-        local = check_pair(
-            match_drug(item.drug_name or "", snapshot),
-            match_diagnosis(diagnosis.name, snapshot),
-            snapshot,
+        local = (
+            check_pair(
+                match_drug(item.drug_name or "", snapshot),
+                match_diagnosis(diagnosis.name, snapshot),
+                snapshot,
+            )
+            if snapshot is not None
+            else disabled_backend_check()
         )
         decision = pair["decision"] if processed else {}
         rule = decision.get("upstream_rule_category")
@@ -116,6 +132,7 @@ def save_ai_result(
     backend_revision: str,
     ai_revision: str,
     snapshot: ReferenceSnapshot | None = None,
+    use_backend_reference: bool = True,
 ) -> ApplicationAIResult:
     """Без commit: запись и изменения заявки фиксируются одной транзакцией.
 
@@ -142,7 +159,8 @@ def save_ai_result(
     _same_request(application, value, currency)
     now = datetime.now(UTC)
     try:
-        checks = result_checks(application, value, snapshot or _load_snapshot(session))
+        reference = (snapshot or _load_snapshot(session)) if use_backend_reference else None
+        checks = result_checks(application, value, reference)
         report = AIReport(
             application_id=application_id,
             saved_at=now,

@@ -141,7 +141,7 @@ def build_report(card: ApplicationCard | dict[str, Any]) -> bytes:
                     item.drug_name,
                     item.mnn,
                     check.diagnosis if check else None,
-                    CATEGORY_LABELS[check.category if check and check.category else "undetermined"],
+                    CATEGORY_LABELS[check.category] if check and check.category else None,
                     "Требует проверки" if needs_review else "Проверено правилом",
                     reason,
                     check.source if check else None,

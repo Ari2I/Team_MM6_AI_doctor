@@ -19,6 +19,7 @@ def isolated_ai_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in (
         "AI_MODE",
+        "AI_USE_BACKEND_REFERENCE",
         "AI_CORPUS_PATH",
         "AI_REGISTRY_PATH",
         "AI_CLINICAL_CACHE_DIR",
