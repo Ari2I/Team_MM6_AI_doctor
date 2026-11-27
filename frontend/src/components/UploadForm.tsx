@@ -45,15 +45,15 @@ export function UploadForm({ file, diagnoses, ageGroup, busy, onChoose, onDiagno
     </label>
     {dropError && <p className="field-error" role="alert">{dropError}</p>}
     <p className="hint">
-      Читается первый лист. Одна строка — один препарат. Диагноз можно указать в строке препарата
-      или добавить к заявке ниже.
+      Поддерживаются обычная таблица на первом листе и AI-книга с листами «Заявка», «Покупки»
+      либо «Заявка», «Диагнозы», «Покупки», «Связи». Для AI-книги используйте согласованный шаблон.
     </p>
 
     <div className="upload-fields">
       <label className="field">Дополнительные диагнозы (необязательно, по одному на строку)
         <textarea rows={3} value={diagnoses} onChange={event => onDiagnoses(event.target.value)}
           placeholder="J45.9 Бронхиальная астма"/>
-        <small>Указывайте код МКБ-10 вместе с названием, например «J45.9 Бронхиальная астма».</small>
+        <small>Для обычной таблицы укажите код МКБ-10 вместе с названием. Для AI-книги оставьте поле пустым: диагнозы и связи берутся из книги.</small>
       </label>
       <label className="field">Возрастная группа для выбора рекомендаций
         <select value={ageGroup} onChange={event => onAgeGroup(event.target.value)}>
@@ -61,6 +61,7 @@ export function UploadForm({ file, diagnoses, ageGroup, busy, onChoose, onDiagno
           <option value="adult">Взрослые</option>
           <option value="child">Дети</option>
         </select>
+        <small>Если возраст указан в AI-книге, группу можно оставить неуказанной. Противоречащие значения не принимаются.</small>
       </label>
     </div>
 
