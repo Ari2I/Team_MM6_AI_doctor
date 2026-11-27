@@ -12,6 +12,8 @@ from .classifier import (
     Citation,
     ClassificationRequest,
     EvidenceFragment,
+    MAX_QUOTE_CHARS,
+    MAX_QUOTE_OPTIONS,
     _group_support,
     _quote_options,
     _role_supported,
@@ -86,6 +88,11 @@ def evidence_bundles(fragments, inn, diagnosis="Selection", context=None, checkp
             candidate = EvidenceBundle((fragment,), 3)
             bundles[candidate.identity] = candidate
         options = _quote_options(fragment.text)
+        if not options and len(fragment.text) > MAX_QUOTE_CHARS:
+            # This is a relevance probe only. If the entire oversized sentence
+            # is linked to the ingredient, candidate_fragments fails closed.
+            # An unrelated group must not abort another ingredient's search.
+            options = [fragment.text]
         # Unrelated prose cannot prove this ingredient or an explicit group.
         if not mentions_inn:
             options = [
@@ -159,32 +166,26 @@ def candidate_fragments(recommendation, inn, *, window_chars=900, checkpoint=Non
     source_id = sha256(f"{recommendation.primary_url}\0{recommendation.version}".encode()).hexdigest()[:24]
     candidates = {}
     seen_text = {}
-    rules = load_classification_rules()
     for segment in recommendation.segments:
         if checkpoint:
             checkpoint()
         sentences = [m.span() for m in re.finditer(r"\S.*?(?:[.!?](?=\s|$)|$)", segment.text, re.DOTALL)]
         for index, (start, end) in enumerate(sentences):
             sentence = segment.text[start:end]
-            if end - start > window_chars:
-                # Long relevant evidence must not be hidden by a quota or cut.
-                group_role = bool(re.search(r"(?<!\w)[А-ЯA-Z][А-ЯA-Z0-9]{2,11}(?!\w)", sentence)) and any(
-                    re.search(p, name_key(sentence), re.I)
-                    for rule in rules.assessments.values()
-                    for p in (*rule.quote_patterns, *rule.reject_patterns)
-                )
-                if (
-                    _inn_pattern(inn).search(name_key(sentence))
-                    or any(p.search(name_key(sentence)) for p in _mention_patterns(inn))
-                    or group_role
-                ):
-                    raise EvidenceContextLimit("Релевантное предложение превышает предел контекста.")
-                continue
+            # 900 is a neighbourhood target, not a maximum sentence length.
+            # Keep the complete long sentence and nearby conditions up to the
+            # existing classifier limit. Oversized sentences remain available
+            # for the relevance check below, never as truncated assertions.
+            limit = MAX_QUOTE_CHARS if len(sentence) > window_chars else window_chars
             left = right = index
-            while left > 0 and end - sentences[left - 1][0] <= window_chars:
+            while left > 0 and right - left + 1 < MAX_QUOTE_OPTIONS and end - sentences[left - 1][0] <= limit:
                 left -= 1
                 start = sentences[left][0]
-            while right + 1 < len(sentences) and sentences[right + 1][1] - start <= window_chars:
+            while (
+                right + 1 < len(sentences)
+                and right - left + 1 < MAX_QUOTE_OPTIONS
+                and sentences[right + 1][1] - start <= limit
+            ):
                 right += 1
                 end = sentences[right][1]
             text = segment.text[start:end].strip()
@@ -211,6 +212,8 @@ def candidate_fragments(recommendation, inn, *, window_chars=900, checkpoint=Non
                 candidates[identity] = fragment
     bundles = evidence_bundles(tuple(candidates.values()), inn, recommendation.title, checkpoint=checkpoint)
     selected = {fragment_key(f): f for bundle in bundles for f in bundle.fragments}
+    if any(len(f.text) > MAX_QUOTE_CHARS for f in selected.values()):
+        raise EvidenceContextLimit("Релевантное предложение превышает предел контекста.")
     return tuple(selected[k] for k in sorted(selected))
 
 

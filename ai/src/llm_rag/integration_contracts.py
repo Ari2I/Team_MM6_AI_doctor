@@ -165,6 +165,8 @@ class ClassificationDiagnostics(Model):
     model_missing_context: list[Text] = Field(default_factory=list)
     missing_context: list[Text] = Field(default_factory=list)
     candidate_count: Annotated[int, Field(ge=0)]
+    embedding_ranked_count: Annotated[int, Field(ge=0)] = 0
+    embedding_unranked_count: Annotated[int, Field(ge=0)] = 0
     bundle_count: Annotated[int, Field(ge=0)]
     packet_count: Annotated[int, Field(ge=0)]
     retry_count: Annotated[int, Field(ge=0, le=1)]

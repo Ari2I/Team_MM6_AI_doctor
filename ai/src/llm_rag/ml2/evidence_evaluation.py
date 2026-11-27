@@ -154,6 +154,10 @@ def evaluate_packets(*, fragments, inn, diagnosis, context, limits, evaluate, co
         "model_missing_context": list(first.missing_context),
         "missing_context": list(merged.missing_context),
         "candidate_count": len(fragments),
+        "embedding_ranked_count": sum(fragment_key(f) in limits.get("similarities", {}) for f in fragments),
+        "embedding_unranked_count": sum(
+            fragment_key(f) not in limits.get("similarities", {}) for f in fragments
+        ),
         "bundle_count": len(bundles),
         "packet_count": len(packets) if fragments else 0,
         "retry_count": retries,

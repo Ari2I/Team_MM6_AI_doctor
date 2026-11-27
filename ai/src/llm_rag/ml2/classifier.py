@@ -18,6 +18,8 @@ from .policy import load_classification_rules, load_system_prompt
 from .registry import RegistryIndex, RegistrySnapshot, inn_key
 
 _RULES = load_classification_rules()
+MAX_QUOTE_CHARS = 3000
+MAX_QUOTE_OPTIONS = 20
 
 
 class Assessment(StrEnum):
@@ -209,9 +211,9 @@ def _quote_options(text: str) -> list[str]:
     options = [
         part.strip()
         for part in re.split(r"(?<=[.!?])\s+", text)
-        if part.strip() and len(part.strip()) <= 3000
+        if part.strip() and len(part.strip()) <= MAX_QUOTE_CHARS
     ]
-    return list(dict.fromkeys(options[:20]))
+    return list(dict.fromkeys(options[:MAX_QUOTE_OPTIONS]))
 
 
 SYSTEM_PROMPT = load_system_prompt()

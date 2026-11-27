@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
+DEFAULT_MAX_TEXT_BYTES = 4000
+
 
 class EmbeddingError(ValueError):
     """Безопасная ошибка вычисления/проверки эмбеддингов."""
@@ -37,7 +39,7 @@ class GigaChatEmbedder:
         batch_size=8,
         allowed_document_hashes=(),
         allowed_queries=(),
-        max_text_bytes=4000,
+        max_text_bytes=DEFAULT_MAX_TEXT_BYTES,
         before_call=None,
     ):
         if any(type(v) is not int or v <= 0 for v in (dimension, batch_size, max_text_bytes)):
@@ -74,6 +76,11 @@ class GigaChatEmbedder:
                 self._cache = {key: self._vector(vector) for key, vector in value["vectors"].items()}
             except (KeyError, ValueError, TypeError):
                 raise EmbeddingError("Кэш эмбеддингов повреждён или несовместим.") from None
+
+    @property
+    def max_text_bytes(self):
+        """Public input bound; retrieval may keep longer evidence unranked."""
+        return self._max_bytes
 
     def _vector(self, value):
         if (

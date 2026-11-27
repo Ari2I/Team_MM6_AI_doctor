@@ -12,6 +12,7 @@ ROOT = Path.cwd() if __file__ == "<stdin>" else Path(__file__).resolve().parents
 SOURCE_FILES = (
     "integration.py",
     "runtime.py",
+    "embeddings.py",
     "integration_contracts.py",
     "integration_excel.py",
     "excel_scenario.py",

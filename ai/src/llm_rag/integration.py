@@ -264,6 +264,7 @@ def _analyze_request(
     pairs, pending, inputs, explanations = [], [], [], []
     embedder = None
     embedding_error = False
+    vector_search_used = False
     if resources.embedding_factory is not None:
         try:
             embedder = resources.embedding_factory(before_call=budget.reserve)
@@ -344,24 +345,32 @@ def _analyze_request(
             similarities = {}
             if embedder is not None and fragments:
                 from llm_rag.vector_index import VectorIndex
+                from llm_rag.embeddings import DEFAULT_MAX_TEXT_BYTES
 
                 canonical = matching_documents[0]
-                texts = [f"МНН: {canonical.inn}. Диагноз: {canonical.diagnosis}. {f.text}" for f in fragments]
+                prefix = f"МНН: {canonical.inn}. Диагноз: {canonical.diagnosis}."
+                limit = getattr(embedder, "max_text_bytes", DEFAULT_MAX_TEXT_BYTES)
+                rankable = [(f, prefix + " " + f.text) for f in fragments
+                            if len((prefix + " " + f.text).encode()) <= limit]
 
                 def fragment_key(f):
                     return json.dumps([f.source_id, f.fragment_id, f.version], ensure_ascii=False)
 
-                index = VectorIndex([fragment_key(f) for f in fragments], embedder.embed_documents(texts))
-                scores = index.similarities(
-                    embedder.embed_query(f"МНН: {canonical.inn}. Диагноз: {canonical.diagnosis}.")
-                )
-                similarities = {
-                    (f.source_id, f.version, f.fragment_id): scores[fragment_key(f)]
-                    for f in fragments
-                }
-                fragments = tuple(
-                    sorted(fragments, key=lambda f: (-scores[fragment_key(f)], fragment_key(f)))
-                )
+                if rankable:
+                    index = VectorIndex([fragment_key(f) for f, _ in rankable],
+                                        embedder.embed_documents([text for _, text in rankable]))
+                    scores = index.similarities(embedder.embed_query(prefix))
+                    similarities = {
+                        (f.source_id, f.version, f.fragment_id): scores[fragment_key(f)]
+                        for f, _ in rankable
+                    }
+                    vector_search_used = True
+                    # Embedding limits do not remove or truncate classification
+                    # evidence. Complete bundles outside that limit remain in
+                    # the same bounded evaluation and conflict checks.
+                    fragments = tuple(sorted(
+                        fragments, key=lambda f: (-scores.get(fragment_key(f), 0.0), fragment_key(f)),
+                    ))
             active_context = dict(context)
             def checkpoint():
                 if resources.clock() >= budget.deadline:
@@ -549,7 +558,7 @@ def _analyze_request(
         ),
         human_report=report,
         retrieval_info=RetrievalInfo(
-            method="vector" if resources.embedding_factory else "lexical",
+            method="vector" if vector_search_used else "lexical",
             embedding_model=embedder.model_id if embedder else None,
             embedding_revision=embedder.revision if embedder else None,
             embedding_dimension=embedder.dimension if embedder else None,
