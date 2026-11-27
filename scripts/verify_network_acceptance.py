@@ -40,8 +40,8 @@ def files_manifest() -> dict[str, str]:
     return {str(path.relative_to(DATA)): hash_file(path) for path in files}
 
 
-def baseline() -> None:
-    target = FOLDER / "embedding-before.json"
+def baseline(folder: Path | None = None) -> None:
+    target = (folder if folder is not None else FOLDER) / "embedding-before.json"
     if target.exists():
         raise ValueError("BASELINE_EXISTS")
     value = json.loads(INDEX.read_text(encoding="utf-8")) if INDEX.exists() else {}
@@ -49,7 +49,8 @@ def baseline() -> None:
     print("Исходные хэши векторов зафиксированы; индекс не изменён.")
 
 
-def assess(result: dict, *, new_vectors: set[str]) -> None:
+def _model_pair(result: dict) -> dict:
+    """Общие требования к полной обработке и модельному разбору одной пары."""
     if result["completeness"] != "COMPLETE" or result["unprocessed_pairs"]:
         raise ValueError("PARTIAL_RESULT")
     if len(result["pairs"]) != 1:
@@ -70,6 +71,13 @@ def assess(result: dict, *, new_vectors: set[str]) -> None:
         raise ValueError("NO_MODEL_REPORT")
     if result.get("usage", {}).get("calls", 0) == 0:
         raise ValueError("NO_MODEL_CALLS")
+    if not result["manifest"].get("registry") or not result["manifest"].get("clinical"):
+        raise ValueError("NO_RESOURCE_VERSIONS")
+    return pair
+
+
+def assess(result: dict, *, new_vectors: set[str]) -> None:
+    pair = _model_pair(result)
     if not pair["citations"] or not (result.get("evidence_snapshot") or {}).get("documents"):
         raise ValueError("NO_SAVED_EVIDENCE")
     # Критерий относится только к одной синтетической контрольной паре.
@@ -94,8 +102,6 @@ def assess(result: dict, *, new_vectors: set[str]) -> None:
         or not new_vectors
     ):
         raise ValueError("NO_FRESH_EMBEDDINGS")
-    if not result["manifest"].get("registry") or not result["manifest"].get("clinical"):
-        raise ValueError("NO_RESOURCE_VERSIONS")
     expected_keys = set()
     for document in result["evidence_snapshot"]["documents"]:
         prefix = f"МНН: {document['inn']}. Диагноз: {document['diagnosis']}."
@@ -105,13 +111,53 @@ def assess(result: dict, *, new_vectors: set[str]) -> None:
         raise ValueError("NO_FRESH_CONTROL_VECTORS")
 
 
-def verify(identifier: UUID) -> None:
+def assess_negative(result: dict) -> None:
+    """Нет фрагментов: не создавать категорию или цитаты; модель объясняет ограничение."""
+    pair = _model_pair(result)
+    decision = pair["decision"]
+    if (
+        not pair.get("inn")
+        or "NO_EVIDENCE" not in pair["reasons"]
+        or decision["classification_basis"] != "NONE"
+        or decision.get("upstream_rule_category") is not None
+        or decision.get("proposed_category") is not None
+        or pair["citations"]
+        or (result.get("evidence_snapshot") or {}).get("documents")
+    ):
+        raise ValueError("NEGATIVE_CONTROL_FAILED")
+    rows = result["human_report"]["items"]
+    if len(rows) != 1 or rows[0]["sources"]:
+        raise ValueError("NEGATIVE_CONTROL_FAILED")
+
+
+def verify_index(result: dict, index: dict, fresh: set[str]) -> None:
+    """Проверить индекс положительного контроля без изменения файла."""
+    if index["revision"] != result["retrieval_info"]["embedding_revision"]:
+        raise ValueError("INDEX_VERSION")
+    dimension = result["retrieval_info"]["embedding_dimension"]
+    if (
+        index["dimension"] != dimension
+        or index["model"] != result["retrieval_info"]["embedding_model"]
+    ):
+        raise ValueError("INDEX_MODEL")
+    for key in fresh:
+        vector = index["vectors"][key]
+        if (
+            len(vector) != dimension
+            or not any(vector)
+            or any(type(v) not in (int, float) or not math.isfinite(v) for v in vector)
+        ):
+            raise ValueError("INDEX_VECTORS")
+
+
+def verify(identifier: UUID, folder: Path | None = None) -> None:
     from app.config import AISettings
     from app.db.session import SessionLocal
     from app.models import ApplicationAIResult, ApplicationItem, ItemCheck
     from app.models.enums import ReviewReason
     from app.services.ai_reports import read_ai_report
 
+    folder = folder if folder is not None else FOLDER
     with SessionLocal() as session:
         stored = session.get(ApplicationAIResult, identifier)
         if stored is None:
@@ -135,7 +181,10 @@ def verify(identifier: UUID) -> None:
             or stored.ai_revision != settings.library_revision
         ):
             raise ValueError("BUILD_MISMATCH")
-        case = json.loads((FOLDER / "case.json").read_text(encoding="utf-8"))
+        case = json.loads((folder / "case.json").read_text(encoding="utf-8"))
+        kind = case.get("control_kind", "positive")
+        if kind not in {"positive", "negative"}:
+            raise ValueError("INVALID_CONTROL_KIND")
         if len(result["request"]["purchases"]) != 1 or len(result["request"]["diagnoses"]) != 1:
             raise ValueError("NOT_CONTROL_CASE")
         diagnosis = result["request"]["diagnoses"][0]
@@ -161,36 +210,26 @@ def verify(identifier: UUID) -> None:
             "Коды пар:",
             ",".join(sorted({r for p in result["pairs"] for r in p["reasons"]})) or "нет",
         )
-        before = set(json.loads((FOLDER / "embedding-before.json").read_text(encoding="utf-8")))
-        index = json.loads(INDEX.read_text(encoding="utf-8")) if INDEX.is_file() else {}
-        fresh = set(index.get("vectors", {})) - before
-        assess(result, new_vectors=fresh)
+        if kind == "positive":
+            before = set(json.loads((folder / "embedding-before.json").read_text(encoding="utf-8")))
+            index = json.loads(INDEX.read_text(encoding="utf-8")) if INDEX.is_file() else {}
+            fresh = set(index.get("vectors", {})) - before
+            assess(result, new_vectors=fresh)
+            print("Полное МНН в фрагментах и итоговых цитатах: OK.")
+            verify_index(result, index, fresh)
+        else:
+            assess_negative(result)
         if (
             result["pairs"][0]["inn"] != case["inn"]
             or result["manifest"]["registry"]["version"] != case["registry_version"]
-            or not any(
+            or kind == "positive"
+            and not any(
                 c["url"] == case["recommendation_url"] for c in result["pairs"][0]["citations"]
             )
         ):
             raise ValueError("SOURCES_CHANGED")
         if report.human_report.model_dump(mode="json") != result["human_report"]:
             raise ValueError("REPORT_MISMATCH")
-        if index["revision"] != result["retrieval_info"]["embedding_revision"]:
-            raise ValueError("INDEX_VERSION")
-        dimension = result["retrieval_info"]["embedding_dimension"]
-        if (
-            index["dimension"] != dimension
-            or index["model"] != result["retrieval_info"]["embedding_model"]
-        ):
-            raise ValueError("INDEX_MODEL")
-        for key in fresh:
-            vector = index["vectors"][key]
-            if (
-                len(vector) != dimension
-                or not any(vector)
-                or any(type(v) not in (int, float) or not math.isfinite(v) for v in vector)
-            ):
-                raise ValueError("INDEX_VECTORS")
         # Положительный TCP-контроль до изоляции, без HTTP, ключей и тела заявки.
         with socket.create_connection(("api.giga.chat", 443), timeout=5) as connection:
             address = connection.getpeername()[0]
@@ -201,15 +240,23 @@ def verify(identifier: UUID) -> None:
                 json.dumps(result, sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest(),
             control_ip=address,
+            control_kind=kind,
         )
-        (FOLDER / "resources-after.json").write_text(
+        (folder / "resources-after.json").write_text(
             json.dumps(receipt, sort_keys=True), encoding="utf-8"
         )
-        print("Модельный отчёт, новые векторы Embeddings, сохранённые цитаты и SHA сборки: OK.")
+        if kind == "positive":
+            print("Модельный отчёт, новые векторы Embeddings, сохранённые цитаты и SHA сборки: OK.")
+        else:
+            print(
+                "Отрицательный контроль: МНН определено, NO_EVIDENCE, "
+                "категория и цитаты отсутствуют; MODEL: OK."
+            )
 
 
-def check_persistence() -> None:
-    before = json.loads((FOLDER / "resources-after.json").read_text(encoding="utf-8"))
+def check_persistence(folder: Path | None = None) -> None:
+    folder = folder if folder is not None else FOLDER
+    before = json.loads((folder / "resources-after.json").read_text(encoding="utf-8"))
     if before["files"] != files_manifest():
         raise ValueError("RESOURCES_CHANGED")
     from app.db.session import SessionLocal
@@ -230,6 +277,7 @@ def check_persistence() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--case-dir", type=Path)
     actions = parser.add_mutually_exclusive_group(required=True)
     actions.add_argument("--baseline", action="store_true")
     actions.add_argument("--application-id", type=UUID)
@@ -240,12 +288,13 @@ def main(argv: list[str] | None = None) -> int:
     logging.disable(logging.CRITICAL)
     try:
         if args.baseline:
-            baseline()
+            baseline(args.case_dir)
         elif args.persistence:
-            check_persistence()
+            check_persistence(args.case_dir)
         elif args.check_egress_blocked:
             # Тот же публичный адрес, доступность которого проверена до изоляции.
-            receipt = json.loads((FOLDER / "resources-after.json").read_text(encoding="utf-8"))
+            folder = args.case_dir if args.case_dir is not None else FOLDER
+            receipt = json.loads((folder / "resources-after.json").read_text(encoding="utf-8"))
             try:
                 with socket.create_connection((receipt["control_ip"], 443), timeout=3):
                     raise ValueError("EGRESS_NOT_BLOCKED")
@@ -257,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                 if args.state_stdin
                 else args.application_id
             )
-            verify(identifier)
+            verify(identifier, args.case_dir)
     except Exception:
         print(
             "Приёмка не подтверждена: проверьте сохранённый результат, исходные векторы и ресурсы."

@@ -13,7 +13,7 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
-from typing import Any
+from typing import Any, Literal
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -24,7 +24,15 @@ DATA = Path("/var/lib/vrach/rag")
 
 
 def _write_case(
-    folder: Path, *, code: str, group: str, recommendation, entry, registry_version: str
+    folder: Path,
+    *,
+    code: str,
+    group: str,
+    recommendation: Any,
+    entry: Any,
+    registry_version: str,
+    control_kind: Literal["positive", "negative"] = "positive",
+    negative_entry: Any | None = None,
 ) -> None:
     from openpyxl import Workbook
 
@@ -52,6 +60,7 @@ def _write_case(
             dict(
                 schema_version="network-case.1",
                 synthetic=True,
+                control_kind=control_kind,
                 age_group=group,
                 icd10=code,
                 diagnosis=diagnosis,
@@ -65,6 +74,23 @@ def _write_case(
         ),
         encoding="utf-8",
     )
+
+    if negative_entry is not None:
+        negative_folder = folder / "negative"
+        negative_folder.mkdir()
+        _write_case(
+            negative_folder,
+            code=code,
+            group=group,
+            recommendation=recommendation,
+            entry=negative_entry,
+            registry_version=registry_version,
+            control_kind="negative",
+        )
+        policy["inns"].append(negative_entry.mnn)
+        (folder / "network-terms.json").write_text(
+            json.dumps(policy, ensure_ascii=False), encoding="utf-8"
+        )
 
 
 def write_case(folder: Path, **values) -> None:
@@ -82,11 +108,13 @@ def select_control_entry(
     recommendation: Any,
     index: Any,
     load_fragments: Callable[..., Sequence[Any]],
+    negative: bool = False,
 ) -> Any:
     """Выбрать реестровую запись с полным МНН во всех предлагаемых фрагментах.
 
-    Это техническое совпадение текста, без назначения категории или вывода
-    о клинической применимости. Проверка не вызывает сеть и не импортирует AI.
+    Для отрицательного случая не должно быть ни полного МНН, ни фрагментов
+    библиотечного поиска. Это технический контроль, без вывода о клинической
+    применимости. Проверка не вызывает сеть и не импортирует AI.
     """
     unique = {}
     for entry in registrations:
@@ -95,13 +123,21 @@ def select_control_entry(
     segments = tuple(normalize_public_text(s.text) for s in recommendation.segments)
     for entry in (unique[key] for key in sorted(unique)):
         pattern = full_inn_pattern(entry.mnn)
-        if pattern is None or not any(pattern.search(text) for text in segments):
+        if pattern is None:
+            continue
+        mentioned = any(pattern.search(text) for text in segments)
+        if (negative and mentioned) or (not negative and not mentioned):
             continue
         fragments = load_fragments(recommendation, entry.mnn, max_fragments=8, window_chars=1600)
-        if not fragments or any(
-            len(fragment.text.encode("utf-8")) > 3000
-            or not pattern.search(normalize_public_text(fragment.text))
-            for fragment in fragments
+        if negative and fragments:
+            continue
+        if not negative and (
+            not fragments
+            or any(
+                len(fragment.text.encode("utf-8")) > 3000
+                or not pattern.search(normalize_public_text(fragment.text))
+                for fragment in fragments
+            )
         ):
             continue
         if index.resolve(entry.trade_name, entry.form).mnn == entry.mnn:
@@ -109,10 +145,16 @@ def select_control_entry(
     raise ValueError("NO_CONTROL_PAIR")
 
 
-def prepare(code: str, group: str) -> None:
+def prepare(
+    code: str,
+    group: str,
+    *,
+    case_dir: Path | None = None,
+    with_negative: bool = False,
+) -> None:
     if not re.fullmatch(r"[A-Z][0-9]{2}(?:\.[0-9]{1,4})?", code):
         raise ValueError
-    folder = DATA / "acceptance"
+    folder = case_dir if case_dir is not None else DATA / "acceptance"
     if folder.exists():
         raise ValueError("CASE_EXISTS")
     sys.path.insert(0, str(ROOT / "ai/src"))
@@ -140,6 +182,15 @@ def prepare(code: str, group: str) -> None:
         index=index,
         load_fragments=fragments_for_inn,
     )
+    negative_entry = None
+    if with_negative:
+        negative_entry = select_control_entry(
+            registry.registrations,
+            recommendation=recommendation,
+            index=index,
+            load_fragments=fragments_for_inn,
+            negative=True,
+        )
     write_case(
         folder,
         code=code,
@@ -147,6 +198,7 @@ def prepare(code: str, group: str) -> None:
         recommendation=recommendation,
         entry=entry,
         registry_version=registry.version,
+        negative_entry=negative_entry,
     )
 
 
@@ -154,19 +206,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--icd10", default="J45.9")
     parser.add_argument("--age-group", choices=["adult", "child"], default="adult")
+    parser.add_argument("--case-dir", type=Path)
+    parser.add_argument("--with-negative", action="store_true")
     args = parser.parse_args(argv)
     logging.disable(logging.CRITICAL)
     try:
-        prepare(args.icd10, args.age_group)
+        prepare(
+            args.icd10,
+            args.age_group,
+            case_dir=args.case_dir,
+            with_negative=args.with_negative,
+        )
     except Exception:
         print(
             "Заявка не подготовлена: проверьте доступ к источникам, "
-            "единственную редакцию и отсутствие прежнего acceptance."
+            "единственную редакцию, пары контроля и отсутствие выбранного каталога."
         )
         return 1
     print(
         "Синтетическая заявка и локальное соответствие МКБ/КР подготовлены; модель не вызывалась."
     )
+    if args.with_negative:
+        print("Отдельный отрицательный случай подготовлен; в выбранной КР фрагменты не найдены.")
     return 0
 
 

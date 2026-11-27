@@ -407,7 +407,7 @@ def test_egress_check_does_not_report_success_for_open_connection(tmp_path, monk
 
 @pytest.mark.parametrize("action", ["prepare", "baseline"])
 def test_cli_hides_external_exception_text(monkeypatch, capsys, action):
-    def broken(*args):
+    def broken(*args, **kwargs):
         raise RuntimeError("PRIVATE-ERROR-MARKER")
 
     if action == "prepare":

@@ -2,4 +2,4 @@
 services:
   api:
     environment:
-      RAG_NETWORK_TERMS: /var/lib/vrach/rag/acceptance/network-terms.json
+      RAG_NETWORK_TERMS: ${RAG_ACCEPTANCE_TERMS:-/var/lib/vrach/rag/acceptance/network-terms.json}
