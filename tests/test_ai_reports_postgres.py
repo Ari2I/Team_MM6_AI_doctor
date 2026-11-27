@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -94,6 +95,30 @@ def save(session: Session, application: Application, mode: str = "complete") -> 
         backend_revision="a" * 40,
         ai_revision="b" * 40,
     )
+
+
+def test_save_accepts_database_money_scale_without_changing_request(
+    session: Session, application: Application, library_path: None
+) -> None:
+    item = next(row for row in application.items if row.row_number == 2)
+    item.amount = Decimal("900")
+    session.flush()
+    result = integration_result(application)
+    sent_amount = next(
+        row["amount"] for row in result["request"]["purchases"] if row["item_id"] == str(item.id)
+    )
+    assert sent_amount == "900"
+    stored = save_ai_result(
+        session,
+        application.id,
+        result,
+        currency="RUB",
+        backend_revision="a" * 40,
+        ai_revision="b" * 40,
+    )
+    session.refresh(item)
+    assert item.amount.as_tuple().exponent == -2
+    assert stored.result["request"] == result["request"]
 
 
 @pytest.mark.parametrize("mode", ["complete", "partial", "fallback", "evidence"])

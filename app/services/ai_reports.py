@@ -35,22 +35,30 @@ def _validated_result(value: dict[str, Any]) -> dict[str, Any]:
 
 def _same_request(application: Application, result: dict[str, Any], currency: str) -> None:
     """Не принять результат другой/изменённой заявки, даже если request_id совпал."""
+    from llm_rag.integration_contracts import IntegrationRequest
+
     from app.services.integration_mapping import validate_integration_request
 
     try:
-        expected = validate_integration_request(
-            prepare_integration_request(application, currency=currency)
+        expected = IntegrationRequest.model_validate(
+            validate_integration_request(
+                prepare_integration_request(application, currency=currency)
+            )
         )
-    except IntegrationMappingError:
+        actual = IntegrationRequest.model_validate(result["request"])
+    except (IntegrationMappingError, ValidationError, ValueError, KeyError, TypeError):
         raise AIReportError() from None
-    actual = result["request"]
-    if actual["request_id"] != expected["request_id"]:
+    if actual.request_id != expected.request_id:
         raise AIReportError()
+    # Decimal сравнивается по значению: PostgreSQL Numeric(12, 2) может вернуть
+    # другую шкалу, не меняя исходной суммы. Тексты и остальные поля — строго.
     for field, key in (("purchases", "item_id"), ("diagnoses", "diagnosis_id")):
-        if {row[key]: row for row in actual[field]} != {row[key]: row for row in expected[field]}:
+        if {getattr(row, key): row for row in getattr(actual, field)} != {
+            getattr(row, key): row for row in getattr(expected, field)
+        }:
             raise AIReportError()
-    if {(r["item_id"], r["diagnosis_id"]) for r in actual["links"]} != {
-        (r["item_id"], r["diagnosis_id"]) for r in expected["links"]
+    if {(r.item_id, r.diagnosis_id) for r in actual.links} != {
+        (r.item_id, r.diagnosis_id) for r in expected.links
     }:
         raise AIReportError()
 

@@ -5,6 +5,7 @@ import subprocess
 import sys
 from copy import deepcopy
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import UUID
@@ -196,6 +197,55 @@ def test_save_rejects_changed_age_group(group: str | None, library_path: None) -
             ai_revision="b" * 40,
         )
     session.add.assert_not_called()
+    session.flush.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["amount", "quantity"])
+@pytest.mark.parametrize("stored_value", ["2.5", "2.50", "2.500"])
+def test_save_compares_decimal_values_after_database_reload(
+    field: str, stored_value: str, library_path: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import analysis
+
+    application = make_application()
+    setattr(application.items[0], field, Decimal("2.5"))
+    value = integration_result(application)
+    # Исходный request сериализован до повторной загрузки строки из Numeric.
+    setattr(application.items[0], field, Decimal(stored_value))
+    session = Mock(spec=Session)
+    session.scalar.return_value = application
+    session.get.return_value = None
+    monkeypatch.setattr(
+        analysis, "_load_snapshot", lambda _: ReferenceSnapshot(reference_version="unconfigured")
+    )
+    stored = save_ai_result(
+        session,
+        application.id,
+        value,
+        currency="RUB",
+        backend_revision="a" * 40,
+        ai_revision="b" * 40,
+    )
+    assert stored.result["request"] == value["request"]
+    session.flush.assert_called_once()
+
+
+@pytest.mark.parametrize("field", ["amount", "quantity"])
+def test_save_rejects_real_decimal_change(field: str, library_path: None) -> None:
+    application = make_application()
+    value = integration_result(application)
+    setattr(application.items[0], field, getattr(application.items[0], field) + Decimal("0.01"))
+    session = Mock(spec=Session)
+    session.scalar.return_value = application
+    with pytest.raises(AIReportError):
+        save_ai_result(
+            session,
+            application.id,
+            value,
+            currency="RUB",
+            backend_revision="a" * 40,
+            ai_revision="b" * 40,
+        )
     session.flush.assert_not_called()
 
 
