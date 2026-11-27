@@ -40,6 +40,7 @@ class Application(Base):
     # Канонический integration-request.1: точный возраст/редакция/явные связи.
     # NULL сохраняет прежние правила связей для плоского Excel.
     integration_input: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
+    analysis_run_id: Mapped[UUID | None]
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     filename: Mapped[str] = mapped_column(Text)

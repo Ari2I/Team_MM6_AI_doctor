@@ -2,9 +2,9 @@
 
 from datetime import datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,3 +26,24 @@ class ApplicationAIResult(Base):
     backend_revision: Mapped[str] = mapped_column(String(40))
     ai_revision: Mapped[str] = mapped_column(String(40))
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ApplicationAIHistory(Base):
+    """Сохранённые версии отчётов; не участвуют в выборе текущего результата."""
+
+    __tablename__ = "application_ai_history"
+    __table_args__ = (
+        UniqueConstraint("application_id", "fingerprint", name="uq_ai_history_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    application_id: Mapped[UUID] = mapped_column(
+        ForeignKey("applications.id", ondelete="CASCADE"),
+        index=True,
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    checks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    backend_revision: Mapped[str] = mapped_column(String(40))
+    ai_revision: Mapped[str] = mapped_column(String(40))
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

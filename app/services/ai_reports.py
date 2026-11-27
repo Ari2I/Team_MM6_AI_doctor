@@ -15,6 +15,7 @@ from app.models import Application, ApplicationAIResult
 from app.models.enums import ReviewReason
 from app.schemas.ai_report import AIReport, AIReportCheck
 from app.schemas.analysis import PairCheck, ReferenceSnapshot
+from app.services.ai_history import archive_ai_result
 from app.services.integration_mapping import IntegrationMappingError, prepare_integration_request
 from app.services.matching import match_diagnosis, match_drug
 from app.services.rules import check_pair
@@ -135,6 +136,7 @@ def save_ai_result(
     ai_revision: str,
     snapshot: ReferenceSnapshot | None = None,
     use_backend_reference: bool = True,
+    expected_run_id: UUID | None = None,
 ) -> ApplicationAIResult:
     """Без commit: запись и изменения заявки фиксируются одной транзакцией.
 
@@ -158,6 +160,8 @@ def save_ai_result(
     )
     if application is None:
         raise AIReportError()
+    if expected_run_id is not None and application.analysis_run_id != expected_run_id:
+        raise AIReportError()
     _same_request(application, value, currency)
     now = datetime.now(UTC)
     try:
@@ -175,6 +179,7 @@ def save_ai_result(
     except (ValidationError, ValueError, TypeError, KeyError):
         raise AIReportError() from None
     stored = session.get(ApplicationAIResult, application_id)
+    archive_ai_result(session, stored)
     if stored is None:
         stored = ApplicationAIResult(application_id=application_id)
         session.add(stored)
@@ -184,6 +189,7 @@ def save_ai_result(
     stored.ai_revision = ai_revision
     stored.saved_at = now
     session.flush()
+    archive_ai_result(session, stored)
     return stored
 
 

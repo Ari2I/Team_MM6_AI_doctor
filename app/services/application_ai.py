@@ -36,6 +36,7 @@ def analyze_network_application(
     if not settings.backend_revision or not settings.library_revision:
         return ApplicationAI(error=ReviewReason.AI_UNAVAILABLE)
     try:
+        run_id = application.analysis_run_id
         prepared = prepare_integration_request(application, currency=settings.currency)
         reply = IntegrationWorkerClient(settings).analyze(prepared)
         if reply.error:
@@ -54,6 +55,7 @@ def analyze_network_application(
                 ai_revision=settings.library_revision,
                 snapshot=snapshot,
                 use_backend_reference=settings.use_backend_reference,
+                expected_run_id=run_id,
             )
             result = stored.result
             pairs = {(pair["item_id"], pair["diagnosis_id"]): pair for pair in result["pairs"]}

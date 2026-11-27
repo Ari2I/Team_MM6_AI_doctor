@@ -13,10 +13,15 @@ SOURCE_FILES = (
     "integration.py",
     "runtime.py",
     "integration_contracts.py",
+    "integration_excel.py",
+    "excel_scenario.py",
     "ml2/classifier.py",
     "ml2/clinicalrecs.py",
     "ml2/official.py",
     "ml2/pipeline.py",
+    "ml2/registry.py",
+    "ml2/evidence_selection.py",
+    "ml2/evidence_evaluation.py",
     "ml2/instructions/classification_rules.json",
 )
 

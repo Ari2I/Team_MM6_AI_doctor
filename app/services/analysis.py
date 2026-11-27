@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -18,6 +18,7 @@ from app.models import (
 )
 from app.schemas.analysis import ReferenceDiagnosis, ReferenceDrug, ReferenceRule, ReferenceSnapshot
 from app.services.ai_adapter import AIAdapter, AIInput
+from app.services.ai_history import archive_ai_result
 from app.services.application_ai import (
     analyze_network_application,
     project_ai_pair,
@@ -67,6 +68,8 @@ def _load_snapshot(session: Session) -> ReferenceSnapshot:
 def _set_error(
     session: Session, application: Application, *, clear_checks: bool = False
 ) -> Application:
+    application.analysis_run_id = uuid4()
+    archive_ai_result(session, session.get(ApplicationAIResult, application.id))
     session.execute(
         delete(ApplicationAIResult).where(ApplicationAIResult.application_id == application.id)
     )
@@ -104,8 +107,10 @@ def analyze_application(session: Session, application_id: UUID | str) -> Applica
         session.execute(
             select(Application.id).where(Application.id == application.id).with_for_update()
         )
+        application.analysis_run_id = uuid4()
         snapshot = _load_snapshot(session) if settings.use_backend_reference else None
         items = list(application.items)
+        archive_ai_result(session, session.get(ApplicationAIResult, application.id))
         # Повторный анализ не должен показывать прежний отчёт как новый результат,
         # включая template/offline и отказ сетевого worker.
         session.execute(
